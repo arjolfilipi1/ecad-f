@@ -6,6 +6,34 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPen, QBrush, QPainter
 from PyQt5.QtCore import Qt, QPointF, QLineF
 
+import_data = {
+    "connectors":{
+        "92":{
+                "ref":"92",
+                "pins":["1","2","3"]
+            },
+            "B":{
+                "ref":"B",
+                "pins":["1"]
+            },
+            "SW":{
+                "ref":"SW",
+                "pins":["1","2","3"]
+            },
+            "A":{
+                "ref":"A",
+                "pins":["1"]
+            }
+            
+    },
+    "wires":[
+        {"from":("92","1"),"to":("B","1"),"length":100},
+        {"from":("92","2"),"to":("SW","1"),"length":100},
+        {"from":("92","3"),"to":("SW","2"),"length":100},
+        {"from":("SW","3"),"to":("A","1"),"length":100},
+    ]
+}
+
 
 # ---------------------------
 # Connection Node
