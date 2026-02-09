@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
 from graphics.schematic_view import SchematicView,PropertiesDock
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import WireItem
-
+from model.netlist import Netlist
 import sys
 from PyQt5.QtCore import Qt,QFile, QTextStream
 
@@ -28,26 +28,38 @@ class MainWindow(QMainWindow):
 
         self.view._scene.selectionChanged.connect(self.on_selection)
         self._create_toolbar()
-        
+        netlist = Netlist()
+        self.conns =[]
+        self.wires = []
+        net = Netlist()
         # Demo objects
         c1 = ConnectorItem("C1", 50, 50)
         c2 = ConnectorItem("C2", 300, 150)
-
+        
         self.view._scene.addItem(c1)
         self.view._scene.addItem(c2)
-
+        net =netlist.connect(c1.pins[0], c2.pins[0])
         w1 = WireItem("W1", c1.pins[0], c2.pins[0],"SW")
+        net =netlist.connect(c1.pins[1], c2.pins[1])
         w2 = WireItem("W2", c1.pins[1], c2.pins[1],"GE")
+        self.wires.append(w1)
+        self.wires.append(w2)
+        self.conns.append(c1)
+        self.conns.append(c2)
         self.view._scene.addItem(w1)
         self.view._scene.addItem(w2)
-        
-
+        self.refresh_connector_labels()
     def on_selection(self):
         items = self.view._scene.selectedItems()
         if items:
             self.props.widget.set_item(items[0])
         else:
             self.props.widget.set_item(None)
+    def refresh_connector_labels(self):
+        for item in self.conns:
+            if isinstance(item, ConnectorItem):
+                item.info.update_text()
+    
     def _create_toolbar(self):
         tb = QToolBar("Tools")
         self.addToolBar(tb)

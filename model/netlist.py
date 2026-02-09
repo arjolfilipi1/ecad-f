@@ -2,7 +2,8 @@ class Net:
     def __init__(self, name):
         self.name = name
         self.pins = set()
-
+    def __str__(self):
+        return str(self.name)
 class Netlist:
     def __init__(self):
         self.nets = {}
@@ -26,7 +27,8 @@ class Netlist:
             net = Net(name)
             net.pins.update([pin_a, pin_b])
             self.nets[name] = net
-
+        print("net",self.nets)
+        return net
     def find_net(self, pin):
         for net in self.nets.values():
             if pin in net.pins:

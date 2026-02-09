@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QGraphicsRectItem,QGraphicsSimpleTextItem,QGraphicsItem
+from PyQt5.QtWidgets import QGraphicsRectItem,QGraphicsSimpleTextItem,QGraphicsItem,QGraphicsTextItem
 from PyQt5.QtCore import QRectF, QPointF
-from PyQt5.QtGui import QBrush
+from PyQt5.QtGui import QBrush,QFont
 from .pin_item import PinItem
 from PyQt5.QtCore import Qt
 class ConnectorItem(QGraphicsRectItem):
@@ -27,6 +27,7 @@ class ConnectorItem(QGraphicsRectItem):
                 self
             )
             self.pins.append(pin)
+        self.info = ConnectorInfoItem(self)
     def scene_position(self):
         return self.pos()
     def itemChange(self, change, value):
@@ -40,3 +41,26 @@ class ConnectorItem(QGraphicsRectItem):
             self.rect().center().x() - self.label.boundingRect().width() / 2,
             -self.label.boundingRect().height() - 10
         )
+
+class ConnectorInfoItem(QGraphicsTextItem):
+    def __init__(self, connector):
+        super().__init__(connector)
+        self.connector = connector
+
+        self.setFont(QFont("Consolas", 8))
+        self.setDefaultTextColor(Qt.darkGray)
+        self.setFlag(self.ItemIgnoresTransformations)  # stays readable
+        self.setZValue(10)
+
+        self.setPos(25, -15)  # offset to the right of connector
+        self.update_text()
+
+    def update_text(self):
+        lines = [f"{self.connector.cid}"]
+        print("updating test")
+        for pin in self.connector.wires:
+            nets = {w.net.name for w in getattr(pin, "wires", []) if w.net !=None and hasattr(w, "net")}
+            net_name = ",".join(nets) if nets else "—"
+            lines.append(f"{pin.pid}: {net_name}")
+
+        self.setPlainText("\n".join(lines))
