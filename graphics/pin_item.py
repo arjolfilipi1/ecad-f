@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QGraphicsEllipseItem
+from PyQt5.QtWidgets import QGraphicsEllipseItem,QGraphicsItem
 from PyQt5.QtCore import QPointF
 from PyQt5.QtGui import QBrush
 
@@ -8,10 +8,16 @@ class PinItem(QGraphicsEllipseItem):
         self.pid = pid
         self.offset = offset
         self.wires = []
-
+        
         self.setPos(offset)
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations,False)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+
         self.setBrush(QBrush())
-        self.setFlag(self.ItemIsSelectable)
+ 
 
     def scene_position(self):
         return self.scenePos()
+    def center(self):
+        rect = self.rect()
+        center = rect.center()

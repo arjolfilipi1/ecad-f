@@ -1,7 +1,12 @@
+from PyQt5.QtGui import  QColor
 class Net:
     def __init__(self, name):
         self.name = name
         self.pins = set()
+        self.wires =  []
+        self.segments = []
+        self.junctions = []
+        self.color = QColor(0,150,255)
     def __str__(self):
         return str(self.name)
 class Netlist:
@@ -27,7 +32,6 @@ class Netlist:
             net = Net(name)
             net.pins.update([pin_a, pin_b])
             self.nets[name] = net
-        print("net",self.nets)
         return net
     def find_net(self, pin):
         for net in self.nets.values():

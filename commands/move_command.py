@@ -13,7 +13,6 @@ class MoveCommand(QUndoCommand):
     def redo(self):
         self.item.setPos(self.new)
 
-Hook into connector movement
 
 def mouseReleaseEvent(self, event):
     new_pos = self.pos()
