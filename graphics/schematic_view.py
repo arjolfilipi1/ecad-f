@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene,QLabel,QDialog,QAction
 from PyQt5.QtWidgets import QDockWidget
 from PyQt5.QtGui import QPen, QBrush, QPainter
 from .pin_item import PinItem
-from .wire_item import WireItem
+# from .wire_item import WireItem
 from PyQt5.QtCore import Qt, QPointF, QLineF
 from .connector_item import ConnectorItem
 from enum import Enum
