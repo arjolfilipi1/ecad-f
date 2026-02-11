@@ -1,17 +1,16 @@
 from model.topology_manager import TopologyManager
 from graphics.topology_item import (
-    JunctionGraphicsItem, BranchPointGraphicsItem, 
-    SegmentGraphicsItem
+    JunctionGraphicsItem, BranchPointGraphicsItem
 )
-
+from graphics.segment_item import SegmentGraphicsItem
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow,QGraphicsScene,QToolBar,QAction,QDialog,QVBoxLayout,QLabel,
-    QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem
+    QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog
     
 )
 from graphics.schematic_view import SchematicView,PropertiesDock
 from graphics.connector_item import ConnectorItem
-from graphics.wire_item import SegmentedWireItem
+from graphics.wire_item import SegmentedWireItem,WireItem
 # from graphics.wire_item import WireItem
 from model.netlist import Netlist
 import sys
@@ -54,6 +53,16 @@ class MainWindow(QMainWindow):
         net = Netlist()
         self.topology_manager = TopologyManager()
         self._create_topology_toolbar()
+        from utils.update_dispatcher import UpdateDispatcher
+        self.update_dispatcher = UpdateDispatcher()
+        self.update_dispatcher.connector_moved.connect(self.on_connector_moved)
+        self.update_dispatcher.connector_rotated.connect(self.on_connector_moved)
+        from graphics.visualization_manager import VisualizationManager
+        self.viz_manager = VisualizationManager(self)
+        self.viz_manager.create_toolbar()
+        self._create_import_menu()
+
+
         # Demo objects
         '''
         c1 = ConnectorItem( 50, 50)
@@ -105,22 +114,33 @@ class MainWindow(QMainWindow):
         self.view._scene.addItem(w3)
         '''
         
-        self.create_harness_example()
+        # self.create_harness_example()
         self.refresh_connector_labels()
         self.view._scene.selectionChanged.connect(self.on_scene_selection)
     def create_harness_example(self):
-        """Setup demo with topology integration"""
-        # Create connectors with topology manager reference
-        c1 = ConnectorItem(50, 50, pin_count=2)
+        """Create a T-configuration harness with proper topology"""
+    
+        # Set netlist in topology manager
+        from model.netlist import Netlist
+        self.netlist = Netlist()
+        self.topology_manager.set_netlist(self.netlist)
+        
+        # 1. CREATE CONNECTORS
+        c1 = ConnectorItem(100, 200, pin_count=3)  # Left
+        c2 = ConnectorItem(500, 100, pin_count=3)  # Top right
+        c3 = ConnectorItem(500, 300, pin_count=3)  # Bottom right
+        
+        # Setup topology for connectors
         c1.set_topology_manager(self.topology_manager)
-        c1.create_topology_node()
-        
-        c2 = ConnectorItem(300, 150, pin_count=2)
         c2.set_topology_manager(self.topology_manager)
-        c2.create_topology_node()
-        
-        c3 = ConnectorItem(200, 100, pin_count=2)
         c3.set_topology_manager(self.topology_manager)
+        c1.set_main_window(self)
+        c2.set_main_window(self)
+        c3.set_main_window(self)
+        
+        # Create topology nodes
+        c1.create_topology_node()
+        c2.create_topology_node()
         c3.create_topology_node()
         
         # Add to scene
@@ -128,84 +148,159 @@ class MainWindow(QMainWindow):
         self.scene.addItem(c2)
         self.scene.addItem(c3)
         
-        # Create a branch point
-        from model.topology import BranchPointNode
-        bp = BranchPointNode((175, 75), "split")
-        self.topology_manager.nodes[bp.id] = bp
+        # 2. CREATE BRANCH POINT (T-junction)
+        bp_pos = (300, 200)  # Between connectors
+        bp_node = self.topology_manager.create_branch_point(bp_pos, "split")
+        bp_graphics = BranchPointGraphicsItem(bp_node)
+        self.scene.addItem(bp_graphics)
         
-        # Create segments between nodes
-        from model.topology import WireSegment
-
-        
-        # C1 -> Branch Point
-        seg1 = WireSegment(
-            start_node=c1.topology_node,
-            end_node=bp,
-            wires=[]
-        )
-        self.topology_manager.segments[seg1.id] = seg1
+        # 3. CREATE SEGMENTS (The "roads")
+        # Main trunk: C1 to Branch Point
+        seg1 = self.topology_manager.create_segment(c1.topology_node, bp_node)
         seg1_graphics = SegmentGraphicsItem(seg1, self.topology_manager)
         self.scene.addItem(seg1_graphics)
         
-        # Branch Point -> C2
-        seg2 = WireSegment(
-            start_node=bp,
-            end_node=c2.topology_node,
-            wires=[]
-        )
-        self.topology_manager.segments[seg2.id] = seg2
+        # Branch to C2
+        seg2 = self.topology_manager.create_segment(bp_node, c2.topology_node)
         seg2_graphics = SegmentGraphicsItem(seg2, self.topology_manager)
         self.scene.addItem(seg2_graphics)
         
-        # Branch Point -> C3
-        seg3 = WireSegment(
-            start_node=bp,
-            end_node=c3.topology_node,
-            wires=[]
-        )
-        self.topology_manager.segments[seg3.id] = seg3
+        # Branch to C3
+        seg3 = self.topology_manager.create_segment(bp_node, c3.topology_node)
         seg3_graphics = SegmentGraphicsItem(seg3, self.topology_manager)
         self.scene.addItem(seg3_graphics)
         
-        # Create wires through topology
-        from model.wire import Wire
-        
-        # Wire 1: C1.P1 -> C2.P1 through branch point
-        wire1 = Wire("W1", c1.pins[0], c2.pins[0], "RT")
-        wire1.add_segment(seg1)
-        wire1.add_segment(seg2)
-        seg1.wires.append(wire1)
-        seg2.wires.append(wire1)
-        
-        wire1_graphics = SegmentedWireItem(wire1)
-        wire1.graphics_item = wire1_graphics
-        self.scene.addItem(wire1_graphics)
-        
-        # Wire 2: C1.P2 -> C3.P1 through branch point
-        wire2 = Wire("W2", c1.pins[1], c3.pins[1], "BL")
-        wire2.add_segment(seg1)
-        wire2.add_segment(seg3)
-        seg1.wires.append(wire2)
-        seg3.wires.append(wire2)
-        
-        wire2_graphics = SegmentedWireItem(wire2)
-        wire2.graphics_item = wire2_graphics
-        self.scene.addItem(wire2_graphics)
-        
-        # Store references
-        self.connectors = [c1, c2, c3]
-        self.wires = [wire1, wire2]
+        # Store segments for later use
         self.segments = [seg1, seg2, seg3]
         
-        # Connect pins
-        c1.pins[0].wires.append(wire1_graphics)
-        c2.pins[0].wires.append(wire1_graphics)
-        c1.pins[1].wires.append(wire2_graphics)
-        c3.pins[1].wires.append(wire2_graphics)
+        # 4. CREATE WIRES (The "vehicles")
+        # Wire 1: C1 Pin1 to C2 Pin1 (through branch point)
+        wire1 = self.topology_manager.route_wire(c1.pins[0], c2.pins[0], [bp_node])
         
-        # Set main window reference on wire graphics
-        wire1_graphics.set_main_window(self)
-        wire2_graphics.set_main_window(self)
+        # Wire 2: C1 Pin2 to C3 Pin2 (through branch point)
+        wire2 = self.topology_manager.route_wire(c1.pins[1], c3.pins[1], [bp_node])
+        
+        # Wire 3: C1 Pin3 to C2 Pin3 (through branch point)
+        wire3 = self.topology_manager.route_wire(c1.pins[2], c2.pins[2], [bp_node])
+        
+        # Wire 4: C1 Pin3 to C3 Pin3 (same pin, through branch point)
+        wire4 = self.topology_manager.route_wire(c1.pins[2], c3.pins[2], [bp_node])
+        
+        # Create graphics for wires
+        self.wire_graphics = []
+        
+        if wire1:
+            from graphics.wire_item import SegmentedWireItem
+            w1g = SegmentedWireItem(wire1)
+            w1g.set_main_window(self)
+            self.scene.addItem(w1g)
+            wire1.graphics_item = w1g
+            c1.pins[0].wires.append(w1g)
+            c2.pins[0].wires.append(w1g)
+            self.wire_graphics.append(w1g)
+        
+        if wire2:
+            from graphics.wire_item import SegmentedWireItem
+            w2g = SegmentedWireItem(wire2)
+            w2g.set_main_window(self)
+            self.scene.addItem(w2g)
+            wire2.graphics_item = w2g
+            c1.pins[1].wires.append(w2g)
+            c3.pins[1].wires.append(w2g)
+            self.wire_graphics.append(w2g)
+        
+        if wire3:
+            from graphics.wire_item import SegmentedWireItem
+            w3g = SegmentedWireItem(wire3)
+            w3g.set_main_window(self)
+            self.scene.addItem(w3g)
+            wire3.graphics_item = w3g
+            c1.pins[2].wires.append(w3g)
+            c2.pins[2].wires.append(w3g)
+            self.wire_graphics.append(w3g)
+        
+        if wire4:
+            from graphics.wire_item import SegmentedWireItem
+            w4g = SegmentedWireItem(wire4)
+            w4g.set_main_window(self)
+            self.scene.addItem(w4g)
+            wire4.graphics_item = w4g
+            c1.pins[2].wires.append(w4g)  # Same pin, second wire
+            c3.pins[2].wires.append(w4g)
+            self.wire_graphics.append(w4g)
+        
+        # Store references
+        self.conns = [c1, c2, c3]
+        self.wires = []
+        if wire1: self.wires.append(wire1)
+        if wire2: self.wires.append(wire2)
+        if wire3: self.wires.append(wire3)
+        if wire4: self.wires.append(wire4)
+        
+        # Add to tree views
+        self.refresh_tree_views()
+        
+        # Print topology info
+        
+
+
+    
+    def refresh_tree_views(self):
+        """Refresh tree widget contents"""
+        self.connectors_tree.clear()
+        self.wires_tree.clear()
+        
+        for conn in self.conns:
+            item = QTreeWidgetItem([conn.cid])
+            item.setData(0, Qt.UserRole, conn)
+            self.connectors_tree.addTopLevelItem(item)
+            conn.tree_item = item
+        
+        for wire in self.wires:
+            item = QTreeWidgetItem([wire.id])
+            item.setData(0, Qt.UserRole, wire)
+            self.wires_tree.addTopLevelItem(item)
+            wire.tree_item = item
+    
+    def on_scene_selection(self):
+        """Handle scene selection - select corresponding tree item"""
+        items = self.view.scene().selectedItems()
+        if not items:
+            return
+
+        obj = items[0]
+        if hasattr(obj, "tree_item") and obj.tree_item:
+            tree = obj.tree_item.treeWidget()
+            tree.setCurrentItem(obj.tree_item)
+            
+            # If it's a connector, show its pins
+            if isinstance(obj, ConnectorItem):
+                print(f"\nSelected {obj.cid}:")
+                for pin in obj.pins:
+                    pos = pin.scene_position()
+                    print(f"  {pin.pid} at {pos}")
+    def _create_import_menu(self):
+        import_action = QAction("Import From Excel", self)
+        import_action.triggered.connect(self.import_from_excel)
+        self.toolbar.addAction(import_action)
+
+    def import_from_excel(self):
+        from utils.excel_import import import_from_excel_to_topology
+        
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Import Wire List", 
+            "", 
+            "Excel Files (*.xlsx *.xls);;CSV Files (*.csv)"
+        )
+        
+        if filepath:
+            success = import_from_excel_to_topology(
+                filepath,
+                self.topology_manager,
+                self
+            )
+
     def on_connector_moved(self, connector):
         """Handle connector movement updates"""
         if connector.topology_node:
@@ -336,15 +431,7 @@ class MainWindow(QMainWindow):
             seg_graphics = SegmentGraphicsItem(segment)
             segment.graphics_item = seg_graphics
             self.scene.addItem(seg_graphics)
-    def on_scene_selection(self):
-        items = self.view.scene().selectedItems()
-        if not items:
-            return
 
-        obj = items[0]
-        if hasattr(obj, "tree_item") and obj.tree_item:
-            tree = obj.tree_item.treeWidget()
-            tree.setCurrentItem(obj.tree_item)
 
     def on_tree_clicked(self, item):
         obj = item.data(0, Qt.UserRole)
@@ -358,6 +445,9 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.props)
     def on_selection(self):
         items = self.view._scene.selectedItems()
+        if len(items) > 0 and hasattr( items[0],"net"):
+            for cp in items[0].net.connection_points:
+                cp.setBrush(Qt.red)
         if items:
             self.props.widget.set_item(items[0])
         else:
@@ -372,6 +462,7 @@ class MainWindow(QMainWindow):
         for item in self.conns:
             if isinstance(item, ConnectorItem):
                 item.info.update_text()
+                
     def split_segment(segment, split_pos):
         p1 = segment.line().p1()
         p2 = segment.line().p2()
@@ -391,19 +482,19 @@ class MainWindow(QMainWindow):
         scene.addItem(s2)
 
     def _create_toolbar(self):
-        tb = QToolBar("Tools")
+        self.toolbar = QToolBar("Tools")
 
-        tb.addActions(self.view.tool_group.actions())
-        self.addToolBar(tb)
+        self.toolbar.addActions(self.view.tool_group.actions())
+        self.addToolBar(self.toolbar)
         add_connetor = QAction("Add connetor", self)
         add_connetor.triggered.connect(self.show_custom_dialog)
-        tb.addAction(add_connetor)
+        self.toolbar.addAction(add_connetor)
         rotate = QAction("rotate", self)
         rotate.triggered.connect(self.rotate)
-        tb.addAction(rotate)
+        self.toolbar.addAction(rotate)
         toggle_connector_info = QAction("Toggle connector info", self)
         toggle_connector_info.triggered.connect(self.toggle_connector_info)
-        tb.addAction(toggle_connector_info)
+        self.toolbar.addAction(toggle_connector_info)
     def show_custom_dialog(self):
         # 3. Create and execute the Dialog
         dialog = QDialog(self)

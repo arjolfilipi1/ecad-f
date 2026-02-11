@@ -7,10 +7,11 @@ class Wire:
     def __init__(self, wire_id: str, 
                  from_pin: PinItem = None,
                  to_pin: PinItem = None,
-                 color_txt: str = "SW"):
+                 color_txt: str = "SW",cross_section:float = 1.0):
         self.id = wire_id
         self.from_pin = from_pin
         self.to_pin = to_pin
+        self.cross_section = cross_section
         self.color_data = CombinedWireColor(color_txt)
         self.segments: List[WireSegment] = []  # Path through segments
         self.net = None

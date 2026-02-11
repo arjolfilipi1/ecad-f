@@ -83,9 +83,9 @@ class TopologyManager:
         return []  # No path found
     
     def route_wire(self, from_pin: PinItem, to_pin: PinItem, 
-                   via_nodes: List[TopologyNode] = None,wid:str=None,import_wire = None) -> Optional[Wire]:
+                   via_nodes: List[TopologyNode] = None) -> Optional[Wire]:
         """Route a wire through the topology graph"""
-        from_connector = from_pin.parent
+        from connector = from_pin.parent
         to_connector = to_pin.parent
         
         # Get connector nodes
@@ -124,11 +124,8 @@ class TopologyManager:
         
         # Import here to avoid circular imports
         from model.wire import Wire
-        if not import_wire:
-            wire = Wire(wire_id, from_pin, to_pin,wid)
-        else:
-            wire = Wire(wire_id =wire_id, from_pin=from_pin, to_pin =to_pin, color_txt = import_wire.color,cross_section= import_wire.cross_section)
-            
+        wire = Wire(wire_id, from_pin, to_pin)
+        
         # Add wire to each segment
         for segment in wire_segments:
             wire.add_segment(segment)
@@ -142,7 +139,7 @@ class TopologyManager:
             net = self.netlist.connect(from_pin, to_pin)
             wire.net = net
         
-
+        print(f"Created wire {wire.id} through {len(wire_segments)} segments")
         return wire
     
     def split_segment(self, segment: WireSegment, split_position, create_junction=True) -> List[WireSegment]:

@@ -4,7 +4,7 @@ import uuid
 
 class TopologyNode:
     """Base class for nodes in the topology graph (connectors, junctions, branch points)"""
-    def __init__(self, node_id: str = None, position=(0, 0)):
+    def __init__(self, node_id: str = None, position=(0, 0),node_type="connector"):
         self.id = node_id or str(uuid.uuid4())
         self.position = position  # (x, y)
         self.connected_segments: List[WireSegment] = []

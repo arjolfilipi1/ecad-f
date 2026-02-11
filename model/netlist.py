@@ -6,6 +6,7 @@ class Net:
         self.wires =  []
         self.segments = []
         self.junctions = []
+        self.connection_points = []
         self.color = QColor(0,150,255)
     def __str__(self):
         return str(self.name)
@@ -16,17 +17,18 @@ class Netlist:
     def connect(self, pin_a, pin_b):
         net_a = self.find_net(pin_a)
         net_b = self.find_net(pin_b)
-
+        
         if net_a and net_b and net_a != net_b:
             net_a.pins |= net_b.pins
             del self.nets[net_b.name]
 
         elif net_a:
             net_a.pins.add(pin_b)
+            return net_a
 
         elif net_b:
             net_b.pins.add(pin_a)
-
+            return net_b
         else:
             name = f"NET_{len(self.nets)+1}"
             net = Net(name)

@@ -71,6 +71,7 @@ class GermanWireColors:
 class CombinedWireColor:
     """Represents a wire with base color and stripe"""
     def __init__(self, base_color: str, stripe_color: Optional[str] = None):
+        base_color = 'SW' if not base_color else base_color
         self.base_color = base_color.upper()
         self.stripe_color = stripe_color.upper() if stripe_color else None
         

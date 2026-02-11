@@ -7,15 +7,15 @@ from itertools import count
 
 class ConnectorItem(QGraphicsRectItem):
     _ids = count(0)
-    def __init__(self, x, y, pin_count=2):
+    def __init__(self, x, y, pin_count=2,orcid:str = ""):
         super().__init__(QRectF(-20, -10, 40, 20))
-        self.cid = "C"+str(next(self._ids))
+        self.cid = "C"+str(next(self._ids)) if not orcid else orcid
         self._label = QGraphicsSimpleTextItem(self.cid, self)
         self.pins = []
         self.tree_item = None
         self.rotation_angle = 0
         self.wires = []
-        
+        self.main_window = None
         # ADD: Reference to topology manager
         self.topology_manager = None
         self.topology_node = None
@@ -37,16 +37,21 @@ class ConnectorItem(QGraphicsRectItem):
             pin = PinItem(
                 f"{self.cid}_P{i+1}",
                 QPointF(-20, -10 + spacing * (i + 1)),
-                self
+                self,
+                pos = f"{i+1}"
             )
             self.pins.append(pin)
         
         self.info = ConnectorInfoItem(self)
     
-    def set_topology_manager(self, manager):
-        """Set reference to topology manager"""
-        self.topology_manager = manager
-        
+    def set_topology_manager(self, topology_manager):
+        """Complete topology setup for this connector"""
+        self.topology_manager = topology_manager
+        self.topology_node = topology_manager.create_connector_node(self)
+
+    def set_main_window(self, window):
+        """Set reference to main window for topology access"""
+        self.main_window = window
     def create_topology_node(self):
         """Create topology node for this connector"""
         if self.topology_manager:
@@ -70,12 +75,15 @@ class ConnectorItem(QGraphicsRectItem):
             self.old_position = self.pos()
             
         elif change == self.ItemPositionHasChanged:
+            if self.main_window and hasattr(self.main_window, 'update_dispatcher'):
+                self.main_window.update_dispatcher.notify_connector_moved(self)
             # Update topology node position
             if self.topology_node:
                 self.topology_node.position = (self.pos().x(), self.pos().y())
             
             # Update visual wires connected to pins
             for pin in self.pins:
+                pin.invalidate_cache()
                 for wire in list(pin.wires):
                     if hasattr(wire, 'update_path'):
                         wire.update_path()
@@ -122,7 +130,8 @@ class ConnectorItem(QGraphicsRectItem):
             
             # If pin has a topology connection point, update it
             if hasattr(pin, 'topology_connection'):
-                pin.topology_connection.position = (scene_pos.x(), scene_pos.y())
+                if pin.topology_connection:
+                    pin.topology_connection.position = (scene_pos.x(), scene_pos.y())
     
     def _update_connected_segments(self):
         """Update all segments connected to this connector's topology node"""
@@ -176,8 +185,9 @@ class ConnectorInfoItem(QGraphicsTextItem):
     def update_text(self):
         lines = [f"{self.connector.cid}"]
         for pin in self.connector.pins:
-            nets = {w.wid for w in getattr(pin, "wires", []) if hasattr(w, "net")}
-            net_name = ",".join(nets) if nets else "—"
+            
+            wids = [w.wire.id for w in pin.wires]
+            net_name = ",".join(wids) if pin.wires else "—"
             lines.append(f"{pin.pid}: {net_name}")
 
         self.setPlainText("\n".join(lines))
