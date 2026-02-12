@@ -1,3 +1,4 @@
+#utils/update_duscpatcher
 from PyQt5.QtCore import QObject, pyqtSignal
 
 class UpdateDispatcher(QObject):

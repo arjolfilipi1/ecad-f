@@ -1,3 +1,4 @@
+#graphics/wire_item
 from PyQt5.QtWidgets import QGraphicsPathItem, QStyle
 from PyQt5.QtGui import QPainterPath, QPen, QColor
 from PyQt5.QtCore import Qt,QPointF
@@ -45,10 +46,7 @@ class WireItem(QGraphicsPathItem):
             self.is_connected = False
             return
         
-        print(f"Wire {self.wid} updating:")
-        print(f"  From pin {self.start_pin.pid} at: {p1}")
-        print(f"  To pin {self.end_pin.pid} at: {p2}")
-        
+
         # Create path with proper elbow routing
         path = QPainterPath(p1)
         
@@ -90,71 +88,7 @@ class WireItem(QGraphicsPathItem):
         painter.drawPath(self.path())
 
                     
-class SegmentedWireItem(QGraphicsPathItem):
-    """Visual representation of a wire that can go through multiple segments"""
-    def __init__(self, wire: Wire):
-        super().__init__()
-        self.wire = wire
-        self.setFlag(self.ItemIsSelectable)
-        self.update_path()
-        self.main_window = None
-    def set_main_window(self, window):
-        """Set reference to main window for topology access"""
-        self.main_window = window
-    def update_path(self):
-        """Draw the complete path of the wire through segments"""
-        if not self.wire.segments:
-            return
-            
-        path = QPainterPath()
-        
-        # Start from the from_pin
-        if self.wire.from_pin:
-            start_pos = self.wire.from_pin.scene_position()
-            path.moveTo(start_pos)
-            
-            # Connect to first segment
-            if self.wire.segments:
-                first_node = self.wire.segments[0].start_node
-                if first_node:
-                    path.lineTo(QPointF(*first_node.position))
-        
-        # Add each segment
-        for segment in self.wire.segments:
-            if segment.start_node and segment.end_node:
-                p1 = QPointF(*segment.start_node.position)
-                p2 = QPointF(*segment.end_node.position)
-                
-                # Add curved segment
-                mid_x = (p1.x() + p2.x()) / 2
-                path.cubicTo(
-                    QPointF(mid_x, p1.y()),
-                    QPointF(mid_x, p2.y()),
-                    p2
-                )
-        
-        # Connect to to_pin
-        if self.wire.to_pin:
-            end_pos = self.wire.to_pin.scene_position()
-            path.lineTo(end_pos)
-            
-        self.setPath(path)
-        
-        # Set color from wire
-        pen = QPen(QColor(*self.wire.color_data.rgb), 2)
-        self.setPen(pen)
-        
-    def paint(self, painter, option, widget):
-        pen = self.pen()
-        if option.state & QStyle.State_Selected:
-            pen.setWidth(4)
-            pen.setColor(Qt.cyan)
-        else:
-            pen.setWidth(2)
-            pen.setColor(QColor(*self.wire.color_data.rgb))
-            
-        painter.setPen(pen)
-        painter.drawPath(self.path())
+
 class SegmentedWireItem(QGraphicsPathItem):
     """Visual representation of a wire that goes through topology"""
     def __init__(self, wire: Wire):

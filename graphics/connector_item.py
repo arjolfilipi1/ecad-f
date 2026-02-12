@@ -1,22 +1,31 @@
-from PyQt5.QtWidgets import QGraphicsRectItem,QGraphicsSimpleTextItem,QGraphicsItem,QGraphicsTextItem
-from PyQt5.QtCore import QRectF, QPointF
-from PyQt5.QtGui import QBrush,QFont
+#graphics/connector_item
+from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsSimpleTextItem, QGraphicsItem, QGraphicsTextItem
+from PyQt5.QtCore import QRectF, QPointF, Qt
+from PyQt5.QtGui import QBrush, QFont
 from .pin_item import PinItem
-from PyQt5.QtCore import Qt
 from itertools import count
+from typing import Union, List,Optional
 
 class ConnectorItem(QGraphicsRectItem):
     _ids = count(0)
-    def __init__(self, x, y, pin_count=2,orcid:str = ""):
+    
+    def __init__(self, x: float, y: float, pins: Union[int, List[str]] = 2,orcid:str = ""):
+        """
+        Args:
+            x, y: position
+            pins: either integer pin count or list of pin identifiers (strings)
+        """
         super().__init__(QRectF(-20, -10, 40, 20))
-        self.cid = "C"+str(next(self._ids)) if not orcid else orcid
+
+        self.cid = ("C"+str(next(self._ids))) if not orcid else orcid
+
         self._label = QGraphicsSimpleTextItem(self.cid, self)
         self.pins = []
+        self.pin_ids = []  # Store original pin identifiers
         self.tree_item = None
         self.rotation_angle = 0
         self.wires = []
         self.main_window = None
-        # ADD: Reference to topology manager
         self.topology_manager = None
         self.topology_node = None
         
@@ -27,22 +36,47 @@ class ConnectorItem(QGraphicsRectItem):
         self.setTransformOriginPoint(0, 0)
         self.setPos(x, y)
         
-        
         self._label.setFlag(QGraphicsItem.ItemIgnoresTransformations)
         self.update_label_pos()
         
-        # Create pins
-        spacing = 20 / (pin_count + 1)
-        for i in range(pin_count):
-            pin = PinItem(
-                f"{self.cid}_P{i+1}",
-                QPointF(-20, -10 + spacing * (i + 1)),
-                self,
-                pos = f"{i+1}"
-            )
-            self.pins.append(pin)
+        # Create pins based on input
+        self._create_pins(pins)
         
         self.info = ConnectorInfoItem(self)
+    
+    def _create_pins(self, pins_spec: Union[int, List[str]]):
+        """Create pin items from specification"""
+        self.pins.clear()
+        self.pin_ids.clear()
+        
+        if isinstance(pins_spec, int):
+            # Legacy mode: generate sequential pin numbers
+            pin_count = pins_spec
+            self.pin_ids = [str(i+1) for i in range(pin_count)]
+        else:
+            # List of pin identifiers (strings)
+            self.pin_ids = pins_spec.copy()
+            pin_count = len(self.pin_ids)
+        
+        # Position pins vertically on left side
+        spacing = 20 / (pin_count + 1)
+        for i, pin_id in enumerate(self.pin_ids):
+            pin = PinItem(
+                f"{self.cid}_{pin_id}",  # e.g., "C0_A1"
+                QPointF(-20, -10 + spacing * (i + 1)),
+                self
+            )
+            # Store the original pin identifier for lookup
+            pin.original_id = pin_id
+            self.pins.append(pin)
+    
+    def get_pin_by_id(self, pin_id: str) -> Optional[PinItem]:
+        """Find pin by its original identifier (e.g., 'A1', '3')"""
+        for pin in self.pins:
+            if hasattr(pin, 'original_id') and pin.original_id == pin_id:
+                return pin
+        return None
+
     
     def set_topology_manager(self, topology_manager):
         """Complete topology setup for this connector"""
@@ -184,9 +218,10 @@ class ConnectorInfoItem(QGraphicsTextItem):
 
     def update_text(self):
         lines = [f"{self.connector.cid}"]
+        self.connector._label.setText(self.connector.cid)
         for pin in self.connector.pins:
             
-            wids = [w.wire.id for w in pin.wires]
+            wids = [w.wid for w in pin.wires]
             net_name = ",".join(wids) if pin.wires else "—"
             lines.append(f"{pin.pid}: {net_name}")
 

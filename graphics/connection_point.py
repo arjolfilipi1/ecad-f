@@ -1,3 +1,4 @@
+#graphics/connection_point
 from PyQt5.QtWidgets import QGraphicsEllipseItem, QGraphicsItem
 from PyQt5.QtGui import QBrush
 from PyQt5.QtCore import QPointF, Qt

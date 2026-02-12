@@ -1,3 +1,4 @@
+#main.py
 from model.topology_manager import TopologyManager
 from graphics.topology_item import (
     JunctionGraphicsItem, BranchPointGraphicsItem
@@ -8,6 +9,7 @@ from PyQt5.QtWidgets import (
     QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog
     
 )
+from PyQt5.QtGui import QCursor
 from graphics.schematic_view import SchematicView,PropertiesDock
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import SegmentedWireItem,WireItem
@@ -16,7 +18,7 @@ from model.netlist import Netlist
 import sys
 from PyQt5.QtCore import Qt,QFile, QTextStream
 
-
+from graphics.visualization_manager import VisualizationManager,VisualizationMode
 
 
 class MainWindow(QMainWindow):
@@ -57,66 +59,49 @@ class MainWindow(QMainWindow):
         self.update_dispatcher = UpdateDispatcher()
         self.update_dispatcher.connector_moved.connect(self.on_connector_moved)
         self.update_dispatcher.connector_rotated.connect(self.on_connector_moved)
-        from graphics.visualization_manager import VisualizationManager
+        
         self.viz_manager = VisualizationManager(self)
         self.viz_manager.create_toolbar()
-        self._create_import_menu()
-
+        self._create_test_menu()
+        self._create_import_toolbar()
+        
 
         # Demo objects
-        '''
-        c1 = ConnectorItem( 50, 50)
-        item = QTreeWidgetItem([c1.cid])
-        item.setData(0, Qt.UserRole, c1)
-
-        self.connectors_tree.addTopLevelItem(item)
-        c1.tree_item = item
-        c2 = ConnectorItem( 300, 150)
-        item = QTreeWidgetItem([c2.cid])
-        item.setData(0, Qt.UserRole, c2)
-
-        self.connectors_tree.addTopLevelItem(item)
-        c2.tree_item = item
-        c3 = ConnectorItem( 200, 100)
-        item = QTreeWidgetItem([c3.cid])
-        item.setData(0, Qt.UserRole, c3)
-        self.connectors_tree.addTopLevelItem(item)
-        c3.tree_item = item
-        self.view._scene.addItem(c1)
-        self.view._scene.addItem(c2)
-        self.view._scene.addItem(c3)
-        net =netlist.connect(c1.pins[0], c2.pins[0])
-        w1 = WireItem( net ,self.view._scene)
-        item = QTreeWidgetItem([w1.wid])
-        item.setData(0, Qt.UserRole, w1)
-        self.wires_tree.addTopLevelItem(item)
-        w1.tree_item = item
-        net =netlist.connect(c1.pins[1], c3.pins[1])
-        w2 = WireItem("W2", c1.pins[1], c3.pins[1],"GE",net)
-        item = QTreeWidgetItem([w2.wid])
-        item.setData(0, Qt.UserRole, w2)
-        self.wires_tree.addTopLevelItem(item)
-        w2.tree_item = item
-        net =netlist.connect(c3.pins[0], c2.pins[1])
-        w3 = WireItem("W3", c3.pins[0], c2.pins[1],"GN",net)
-        item = QTreeWidgetItem([w3.wid])
-        item.setData(0, Qt.UserRole, w3)
-        self.wires_tree.addTopLevelItem(item)
-        w3.tree_item = item
-        self.wires.append(w1)
-        self.wires.append(w2)
-        self.wires.append(w3)
-        self.conns.append(c1)
-        self.conns.append(c2)
-        self.conns.append(c3)
-        self.view._scene.addItem(w1)
-        self.view._scene.addItem(w2)
-        self.view._scene.addItem(w3)
-        '''
         
         # self.create_harness_example()
         self.refresh_connector_labels()
         self.view._scene.selectionChanged.connect(self.on_scene_selection)
+    def _create_import_toolbar(self):
+        """Create import and routing toolbar"""
+        tb = QToolBar("Import & Routing")
+        self.addToolBar(tb)
+        
+        # Import button
+        import_btn = QAction("📥 Import Excel", self)
+        import_btn.triggered.connect(self.import_from_excel)
+        tb.addAction(import_btn)
+        
+        # Auto-route button
+        route_btn = QAction("🔄 Create Branches", self)
+        route_btn.triggered.connect(self.auto_route_wires)
+        tb.addAction(route_btn)
+        
+        # Clear topology button
+        clear_btn = QAction("🗑️ Clear Topology", self)
+        clear_btn.triggered.connect(self.clear_topology)
+        tb.addAction(clear_btn)
+        
+        tb.addSeparator()
+        
+        # Manual routing tools
+        add_bp_btn = QAction("➕ Branch Point", self)
+        add_bp_btn.triggered.connect(self.add_branch_point_manual)
+        tb.addAction(add_bp_btn)
+        
+        add_seg_btn = QAction("🔗 Add Segment", self)
+        add_seg_btn.triggered.connect(self.add_segment_manual)
+        tb.addAction(add_seg_btn)
+
     def create_harness_example(self):
         """Create a T-configuration harness with proper topology"""
     
@@ -246,21 +231,26 @@ class MainWindow(QMainWindow):
 
     
     def refresh_tree_views(self):
-        """Refresh tree widget contents"""
+        """Refresh tree widget contents - ONLY SHOW CONNECTORS AND ROUTED WIRES"""
         self.connectors_tree.clear()
         self.wires_tree.clear()
         
+        # Show connectors
         for conn in self.conns:
             item = QTreeWidgetItem([conn.cid])
             item.setData(0, Qt.UserRole, conn)
             self.connectors_tree.addTopLevelItem(item)
             conn.tree_item = item
         
-        for wire in self.wires:
-            item = QTreeWidgetItem([wire.id])
-            item.setData(0, Qt.UserRole, wire)
-            self.wires_tree.addTopLevelItem(item)
-            wire.tree_item = item
+        # Show ONLY ROUTED WIRES (SegmentedWireItem), NOT direct WireItem
+        if hasattr(self, 'routed_wire_items'):
+            for wire_graphics in self.routed_wire_items:
+                if hasattr(wire_graphics, 'wire') and wire_graphics.wire:
+                    item = QTreeWidgetItem([wire_graphics.wire.id])
+                    item.setData(0, Qt.UserRole, wire_graphics)
+                    self.wires_tree.addTopLevelItem(item)
+                    wire_graphics.tree_item = item
+
     
     def on_scene_selection(self):
         """Handle scene selection - select corresponding tree item"""
@@ -279,12 +269,19 @@ class MainWindow(QMainWindow):
                 for pin in obj.pins:
                     pos = pin.scene_position()
                     print(f"  {pin.pid} at {pos}")
-    def _create_import_menu(self):
-        import_action = QAction("Import From Excel", self)
-        import_action.triggered.connect(self.import_from_excel)
+    def _create_test_menu(self):
+        import_action = QAction("test", self)
+        import_action.triggered.connect(self.delete_wires)
         self.toolbar.addAction(import_action)
-
+    def delete_wires(self):
+        print("test")
+        for w in self.imported_wire_items:
+            print(str(type(w)),w.wid)
+            # self.scene.removeItem(w)
+            # del w
     def import_from_excel(self):
+        """Import Excel file with wires only (no topology)"""
+        from PyQt5.QtWidgets import QFileDialog
         from utils.excel_import import import_from_excel_to_topology
         
         filepath, _ = QFileDialog.getOpenFileName(
@@ -298,8 +295,68 @@ class MainWindow(QMainWindow):
             success = import_from_excel_to_topology(
                 filepath,
                 self.topology_manager,
-                self
+                self,
+                auto_route=False  # IMPORTANT: wires only!
             )
+            
+            if success:
+                self.statusBar().showMessage(f"Imported {filepath}", 5000)
+                # Initialize auto-router after import
+                from utils.auto_route import HarnessAutoRouter
+                self.auto_router = HarnessAutoRouter(self.topology_manager, self)
+            else:
+                self.statusBar().showMessage("Import failed", 5000)
+    
+    def auto_route_wires(self):
+        """Convert direct wires to branched topology"""
+        if not hasattr(self, 'auto_router'):
+            from utils.auto_route import HarnessAutoRouter
+            self.auto_router = HarnessAutoRouter(self.topology_manager, self)
+        
+        # Confirm with user
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Create Branches",
+            "This will replace direct wires with branched topology.\n"
+            "Existing branch points and segments will be cleared.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            
+            self.auto_router.clear_topology()
+            success = self.auto_router.route_from_imported_data()
+            from graphics.visualization_manager import VisualizationManager,VisualizationMode
+            if success:
+                self.statusBar().showMessage("Topology created successfully", 3000)
+                # Switch to bundle view
+                if hasattr(self, 'viz_manager'):
+                    self.viz_manager.set_mode(VisualizationMode.BUNDLES_ONLY)
+            else:
+                self.statusBar().showMessage("Auto-routing failed", 3000)
+    def clear_topology(self):
+        """Remove all branch points and segments, keep connectors and wires"""
+        if hasattr(self, 'auto_router'):
+            self.auto_router.clear_topology()
+            self.statusBar().showMessage("Topology cleared", 3000)
+
+    def add_branch_point_manual(self):
+        """Add branch point at cursor position"""
+        if not hasattr(self, 'manual_router'):
+            from utils.auto_route import ManualRouter
+            self.manual_router = ManualRouter(self.topology_manager, self)
+        
+        self.manual_router.create_branch_point_at_cursor()
+
+    def add_segment_manual(self):
+        """Create segment between two selected nodes"""
+        if not hasattr(self, 'manual_router'):
+            from utils.auto_route import ManualRouter
+            self.manual_router = ManualRouter(self.topology_manager, self)
+        
+        self.manual_router.create_segment_between_selected()
 
     def on_connector_moved(self, connector):
         """Handle connector movement updates"""
@@ -414,7 +471,7 @@ class MainWindow(QMainWindow):
         self.scene.addItem(wire_graphics)
         
         # Add to wires tree
-        item = QTreeWidgetItem([wire.id])
+        item = QTreeWidgetItem([wire.wid])
         item.setData(0, Qt.UserRole, wire_graphics)
         self.wires_tree.addTopLevelItem(item)
         wire_graphics.tree_item = item
@@ -450,8 +507,15 @@ class MainWindow(QMainWindow):
                 cp.setBrush(Qt.red)
         if items:
             self.props.widget.set_item(items[0])
+            if isinstance( items[0],ConnectorItem):
+                print((items[0].cid))
+                for pin in items[0].pins:
+                    print(pin.pid)
+                    for wire in pin.wires:
+                        print(type(wire),wire.wid)
         else:
             self.props.widget.set_item(None)
+        
     def toggle_connector_info(self):
         for item in self.scene.items():
             if isinstance(item, ConnectorItem):

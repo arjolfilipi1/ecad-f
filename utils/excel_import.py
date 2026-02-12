@@ -1,3 +1,4 @@
+#utils/excel_import
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass, field
@@ -6,6 +7,7 @@ from uuid import uuid4
 from graphics.topology_item import (
     JunctionGraphicsItem, BranchPointGraphicsItem
 )
+from graphics.connector_item import ConnectorItem
 from graphics.segment_item import SegmentGraphicsItem
 @dataclass
 class ImportedWire:
@@ -106,7 +108,7 @@ class ExcelHarnessImporter:
                 # Try CSV
                 self.df = pd.read_csv(self.filepath, sep=';')
             
-            print(f"Loaded {len(self.df)} rows from {self.filepath}")
+            #print(f"Loaded {len(self.df)} rows from {self.filepath}")
             return True
         except Exception as e:
             self.errors.append(f"Failed to load Excel: {str(e)}")
@@ -227,7 +229,7 @@ class ExcelHarnessImporter:
                 self.errors.append(f"Row {idx}: Failed to parse - {str(e)}")
         
         self.wires = wires
-        print(f"Extracted {len(wires)} wires")
+        #print(f"Extracted {len(wires)} wires")
         return wires
     
     def extract_connectors(self) -> Dict[str, ImportedConnector]:
@@ -281,10 +283,11 @@ class ExcelHarnessImporter:
         
         # Update pin counts
         for connector in connectors.values():
-            connector.pin_count = len(connector.pins)
-        
+
+            connector.pin_count = list(connector.pins.keys())
+            
         self.connectors = connectors
-        print(f"Extracted {len(connectors)} unique connectors")
+        #print(f"Extracted {len(connectors)} unique connectors")
         return connectors
     
     def _find_part_number(self, device_name: str) -> str:
@@ -343,149 +346,120 @@ class ExcelHarnessImporter:
 
 # ==================== INTEGRATION WITH YOUR SYSTEM ====================
 
-def import_from_excel_to_topology(filepath: str, topology_manager, main_window) -> bool:
+def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_route=False):
     """
-    Import Excel data directly into your topology system
+    Import Excel data into topology system
     
     Args:
-        filepath: Path to Excel file
-        topology_manager: Your TopologyManager instance
-        main_window: MainWindow instance for adding graphics
-    
-    Returns:
-        bool: Success status
+        filepath: Excel file path
+        topology_manager: TopologyManager instance
+        main_window: MainWindow reference
+        auto_route: If True, create full topology with branches
+                    If False, create minimal connectors and wires only
     """
-    
-    # 1. Import data from Excel
     importer = ExcelHarnessImporter(filepath)
     if not importer.load_excel():
-        print("Failed to load Excel file")
         return False
     
     importer.clean_dataframe()
     wires = importer.extract_wires()
     connectors = importer.extract_connectors()
+    print(connectors)
+    # Store import data for later routing
+    main_window.imported_wires_data = wires  # ← Rename to avoid confusion
+    main_window.imported_connectors = connectors
     
-    # 2. Create connectors in the scene
     created_connectors = {}
+    x_pos, y_pos = 100, 100
     
-    # Position connectors in a reasonable layout
-    x_pos = 100
-    y_pos = 100
-    
+    # 1. CREATE CONNECTORS
     for device_name, conn_data in connectors.items():
-        from graphics.connector_item import ConnectorItem
+        pin_ids = list(conn_data.pins.keys())
+        pin_ids.sort()
         
-        # Create connector with appropriate pin count
-        pin_count = conn_data.pin_count
-        connector = ConnectorItem(x_pos, y_pos, pin_count,orcid = device_name)
+        connector = ConnectorItem(x_pos, y_pos, pins=pin_ids)
         connector.cid = device_name
         
-        # Setup topology
+        # Setup topology minimally
         connector.set_topology_manager(topology_manager)
         connector.set_main_window(main_window)
         connector.create_topology_node()
         
-        # Add to scene
         main_window.scene.addItem(connector)
-        
-        # Store for wire creation
         created_connectors[device_name] = connector
         
-        # Update position for next connector
         x_pos += 200
         if x_pos > 800:
             x_pos = 100
             y_pos += 200
     
-    # 3. Create branch points and segments based on wiring patterns
-    # This is a simplified approach - you'd want to analyze wiring patterns
-    # and create optimal topology
+    # 2. CREATE WIRES - SINGLE CREATION, SINGLE STORAGE
+    from graphics.wire_item import WireItem
+    from model.netlist import Netlist
     
-    # For demo, create a central branch point
-    bp_pos = (400, 300)
-    #bp_node = topology_manager.create_branch_point(bp_pos, "split")
-    #bp_graphics = BranchPointGraphicsItem(bp_node)
-    # main_window.scene.addItem(bp_graphics)
+    netlist = Netlist()
+    topology_manager.set_netlist(netlist)
     
-    # Create segments to all connectors
-    '''
-    for device_name, connector in created_connectors.items():
-        segment = topology_manager.create_segment(
-            connector.topology_node,
-            bp_node
-        )
-        segment_graphics = SegmentGraphicsItem(segment, topology_manager)
-        main_window.scene.addItem(segment_graphics)
-    '''
-    # 4. Create wires through topology
-    from graphics.wire_item import SegmentedWireItem
+    # Clear any existing wire lists
+    main_window.imported_wire_items = []
+    main_window.wires = []
     
-    for wire_data in wires:
-        from_connector = created_connectors.get(wire_data.from_device)
-        to_connector = created_connectors.get(wire_data.to_device)
+    for wd in wires:
+        from_conn = created_connectors.get(wd.from_device)
+        to_conn = created_connectors.get(wd.to_device)
         
-        if not from_connector or not to_connector:
-            main_window.statusBar().showMessage(
-                f"Warning: Could not find connector for wire {wire_data.wire_id}",
-                3000
-            )
+        if not from_conn or not to_conn:
             continue
         
-        # Find pins
-        from_pin = None
-        to_pin = None
-        
-        for pin in from_connector.pins:
-            if wire_data.wire_id == "GM4406": print(pin.pid,wire_data.from_pin)
-            if pin.pos ==(wire_data.from_pin) or wire_data.from_pin in pin.pos:
-                from_pin = pin
-                break
-        
-        for pin in to_connector.pins:
-            if pin.pos ==(wire_data.to_pin) or wire_data.to_pin in pin.pos:
-                to_pin = pin
-                break
+        from_pin = from_conn.get_pin_by_id(wd.from_pin)
+        to_pin = to_conn.get_pin_by_id(wd.to_pin)
         
         if not from_pin or not to_pin:
-            main_window.statusBar().showMessage(
-                f"Warning: Could not find pins for wire {wire_data.wire_id}",
-                3000
-            )
             continue
         
-        # Route wire through branch point
-        # wire = topology_manager.route_wire(from_pin, to_pin, [bp_node])
-        wire = topology_manager.route_wire(from_pin, to_pin,import_wire = wire_data)
+        # Create net
+        net = netlist.connect(from_pin, to_pin)
         
-        if wire:
-            # Set wire properties
-            wire.id = wire_data.wire_id
-            wire.color = wire_data.color
-            wire.cross_section = wire_data.cross_section
-            
-            # Create graphics
-            wire_graphics = SegmentedWireItem(wire)
-            wire_graphics.set_main_window(main_window)
-            main_window.scene.addItem(wire_graphics)
-            wire.graphics_item = wire_graphics
-            
-            # Connect to pins
-            from_pin.wires.append(wire_graphics)
-            to_pin.wires.append(wire_graphics)
-            from_connector.info.update_text()
-            to_connector.info.update_text()
+        # CREATE DIRECT WIRE - ONLY ONCE
+        wire = WireItem(
+            wd.wire_id,
+            from_pin,
+            to_pin,
+            wd.color,
+            net
+        )
+        
+        # Store all data in the wire object
+        wire.wire_data = wd
+        wire.net = net
+        
+        # Add to scene
+        main_window.scene.addItem(wire)
+        
+        # Connect to pins
+        # from_pin.wires.append(wire)
+        # to_pin.wires.append(wire)
+        
+        # STORE IN EXACTLY ONE LIST for later routing
+        main_window.imported_wire_items.append(wire)
+        # DO NOT also store in main_window.wires - that's for routed wires
+        
+    # Store connectors for tree view
+    main_window.conns = list(created_connectors.values())
     
-    # 5. Refresh views
+    # IMPORTANT: Clear wires list - it should only contain ROUTED wires, not direct wires
+    main_window.wires = []
+    
+    # Refresh tree views - but only show connectors, not direct wires
     main_window.refresh_connector_labels()
-    main_window.refresh_tree_views()
+    main_window.refresh_tree_views()  # ← Modify this to not show direct wires
     
-    # 6. Print summary
-    summary = importer.generate_summary()
-    print("\n=== IMPORT SUMMARY ===")
-    print(f"Wires imported: {summary['total_wires']}")
-    print(f"Connectors created: {len(created_connectors)}")
-    print(f"Errors: {len(summary['errors'])}")
-    print(f"Warnings: {len(summary['warnings'])}")
+    print(f"\n=== IMPORT COMPLETE ===")
+    print(f"Connectors: {len(created_connectors)}")
+    print(f"Direct Wires: {len(main_window.imported_wire_items)}")
+    print(f"Auto-route: {auto_route}")
     
     return True
+
+
+

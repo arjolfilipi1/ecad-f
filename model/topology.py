@@ -1,3 +1,4 @@
+#model/topology
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Set
 import uuid
@@ -8,7 +9,7 @@ class TopologyNode:
         self.id = node_id or str(uuid.uuid4())
         self.position = position  # (x, y)
         self.connected_segments: List[WireSegment] = []
-
+        self.type = None
 class JunctionNode(TopologyNode):
     """Represents a junction where multiple wire segments meet"""
     def __init__(self, position=(0, 0)):

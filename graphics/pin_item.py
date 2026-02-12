@@ -1,3 +1,4 @@
+#graphics/pin_item
 from PyQt5.QtWidgets import QGraphicsEllipseItem, QGraphicsItem
 from PyQt5.QtCore import QPointF,Qt
 from PyQt5.QtGui import QBrush, QTransform
@@ -5,7 +6,9 @@ from PyQt5.QtGui import QBrush, QTransform
 class PinItem(QGraphicsEllipseItem):
     def __init__(self, pid, offset: QPointF, parent,pos =""):
         super().__init__(-3, -3, 6, 6, parent)
-        self.pid = pid
+        self.pid = pid  # e.g., "C0_A1"
+        self.original_id = None  # will be set by connector
+
         self.pos = pos
         self.offset = offset  # Position RELATIVE to parent connector
         self.wires = []

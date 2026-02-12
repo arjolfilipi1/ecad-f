@@ -1,3 +1,4 @@
+#model/topology_manager
 from typing import List, Dict, Optional, Set
 from model.topology import TopologyNode, JunctionNode, BranchPointNode, WireSegment, Bundle
 from model.wire import Wire

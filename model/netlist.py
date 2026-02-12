@@ -1,3 +1,4 @@
+#model/netlist
 from PyQt5.QtGui import  QColor
 class Net:
     def __init__(self, name):

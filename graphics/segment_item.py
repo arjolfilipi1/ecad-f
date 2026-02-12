@@ -1,3 +1,4 @@
+#graphics/segment_item
 from PyQt5.QtWidgets import QGraphicsPathItem, QStyle
 from PyQt5.QtCore import  QPointF,Qt
 from PyQt5.QtGui import QPainterPath,QPen, QColor

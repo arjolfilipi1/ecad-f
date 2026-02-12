@@ -1,3 +1,4 @@
+#graphics/schematic_view
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene,QLabel,QDialog,QAction,QActionGroup,QTreeWidgetItem
 from PyQt5.QtWidgets import QDockWidget
 from PyQt5.QtGui import QPen, QBrush, QPainter
@@ -165,14 +166,16 @@ class PropertiesWidget(QWidget):
         super().__init__()
         self.layout = QFormLayout(self)
         self.current_item = None
-
+        self.type_label = QLabel("")
         self.id_edit = QLineEdit()
+        self.layout.addRow("Type", self.type_label)
         self.layout.addRow("ID", self.id_edit)
 
         self.id_edit.textChanged.connect(self.update_item)
 
     def set_item(self, item):
         self.current_item = item
+        self.type_label.setText(str(type(item)))
         if hasattr(item, "cid"):
             self.id_edit.setText(item.cid)
         elif hasattr(item, "wid"):
