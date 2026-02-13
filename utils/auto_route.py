@@ -66,7 +66,9 @@ class HarnessAutoRouter:
             self.main_window.viz_manager.set_mode(VisualizationMode.ALL)
             self.main_window.viz_manager.show_direct_wires = False
             self.main_window.viz_manager.update_visibility()
-        
+        for c in self.main_window.conns:
+            c.moveBy(1, 1)
+            c.moveBy(-1, -1)
         print("=== AUTO-ROUTING COMPLETED ===\n")
         return True
 

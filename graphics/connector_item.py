@@ -1,7 +1,7 @@
 #graphics/connector_item
-from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsSimpleTextItem, QGraphicsItem, QGraphicsTextItem
-from PyQt5.QtCore import QRectF, QPointF, Qt
-from PyQt5.QtGui import QBrush, QFont
+from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsSimpleTextItem, QGraphicsItem, QGraphicsTextItem, QGraphicsDropShadowEffect
+from PyQt5.QtCore import QRectF, QPointF, Qt, QPropertyAnimation, QEasingCurve
+from PyQt5.QtGui import QBrush, QFont, QPen, QColor, QPainter, QPainterPath
 from .pin_item import PinItem
 from itertools import count
 from typing import Union, List,Optional
@@ -16,6 +16,14 @@ class ConnectorItem(QGraphicsRectItem):
             pins: either integer pin count or list of pin identifiers (strings)
         """
         super().__init__(QRectF(-20, -10, 40, 20))
+        # Remove the default selection rectangle
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsItem.ItemIsFocusable, True)  # For hover events
+        
+        # Enable hover events
+        self.setAcceptHoverEvents(True)
 
         self.cid = ("C"+str(next(self._ids))) if not orcid else orcid
 
@@ -29,21 +37,36 @@ class ConnectorItem(QGraphicsRectItem):
         self.topology_manager = None
         self.topology_node = None
         
-        self.setBrush(QBrush(Qt.lightGray))
-        self.setFlag(self.ItemIsMovable)
-        self.setFlag(self.ItemIsSelectable)
-        self.setFlag(self.ItemSendsGeometryChanges)
+        # Visual properties
+        self.normal_brush = QBrush(Qt.lightGray)
+        self.normal_pen = QPen(Qt.black, 1)
+        self.hover_pen = QPen(QColor(255, 200, 0), 1)  # Yellow glow
+        self.selected_pen = QPen(QColor(0, 120, 255), 2)  # Blue glow
+        
+        self.setBrush(self.normal_brush)
+        self.setPen(self.normal_pen)
+
         self.setTransformOriginPoint(0, 0)
         self.setPos(x, y)
         
         self._label.setFlag(QGraphicsItem.ItemIgnoresTransformations)
         self.update_label_pos()
-        
+        # Selection state
+        self._is_hovered = False
+
         # Create pins based on input
         self._create_pins(pins)
         
         self.info = ConnectorInfoItem(self)
-    
+        self.shadow = QGraphicsDropShadowEffect()
+
+        # 2. Configure properties
+        self.shadow.setBlurRadius(10)             # Softness of the shadow (default is 1)
+        self.shadow.setXOffset(5)                 # Horizontal displacement
+        self.shadow.setYOffset(5)                 # Vertical displacement
+        self.shadow.setColor(QColor(250, 250, 250, 160)) # Shadow color with transparency
+        self.setGraphicsEffect(self.shadow)
+        self.shadow.setEnabled(True)
     def _create_pins(self, pins_spec: Union[int, List[str]]):
         """Create pin items from specification"""
         self.pins.clear()
@@ -104,6 +127,11 @@ class ConnectorItem(QGraphicsRectItem):
         return positions
     
     def itemChange(self, change, value):
+        if change == self.ItemSelectedChange:
+            # Selection state is changing
+            self.update()
+
+
         if change == self.ItemPositionChange:
             # Store old position for topology updates
             self.old_position = self.pos()
@@ -201,6 +229,44 @@ class ConnectorItem(QGraphicsRectItem):
             self.rect().center().x() - self._label.boundingRect().width() / 2,
             -self._label.boundingRect().height() - 10
         )
+    def paint(self, painter, option, widget=None):
+        """Custom paint to remove selection rectangle and add glow effects"""
+        # Save the painter state
+        painter.save()
+        
+        # Set pen based on state
+        if self.isSelected():
+            painter.setPen(self.selected_pen)
+            # Add subtle glow effect
+            painter.setBrush(self.brush())
+        elif self._is_hovered:
+            painter.setPen(self.hover_pen)
+            self.shadow.setEnabled(True)
+            painter.setBrush(self.brush())
+        else:
+            self.shadow.setEnabled(True)
+            painter.setPen(self.normal_pen)
+            painter.setBrush(self.brush())
+        
+        # Draw the connector rectangle
+        painter.drawRect(self.rect())
+        
+        # Restore painter
+        painter.restore()
+        
+        # Draw children (pins, label, info) - they paint themselves
+    
+    def hoverEnterEvent(self, event):
+        """Handle mouse enter for yellow glow"""
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        """Handle mouse leave - remove yellow glow"""
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
 
 
 class ConnectorInfoItem(QGraphicsTextItem):

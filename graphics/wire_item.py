@@ -1,6 +1,6 @@
 #graphics/wire_item
-from PyQt5.QtWidgets import QGraphicsPathItem, QStyle
-from PyQt5.QtGui import QPainterPath, QPen, QColor
+from PyQt5.QtWidgets import QGraphicsPathItem, QStyle, QGraphicsDropShadowEffect
+from PyQt5.QtGui import QPainterPath, QPen, QColor, QPainter
 from PyQt5.QtCore import Qt,QPointF
 from model.wire import Wire
 from model.topology import WireSegment
@@ -17,7 +17,6 @@ class WireItem(QGraphicsPathItem):
         self.tree_item = None
         self.color_data = CombinedWireColor(color_txt)
         self.color = QColor(*self.color_data.rgb)
-        self.setPen(QPen(self.color, 2))
         self.setFlag(self.ItemIsSelectable)
         self.is_connected = True
         
@@ -28,10 +27,23 @@ class WireItem(QGraphicsPathItem):
         # Reference for topology
         self.main_window = None
         
+        
+        # Remove default selection
+        self.setFlag(self.ItemIsSelectable, True)
+        self.setFlag(self.ItemIsFocusable, True)
+        self.setAcceptHoverEvents(True)
+        # Visual properties
+        self.normal_pen = QPen(self.color, 2)
+        self.hover_pen = QPen(QColor(255, 255, 0), 3)
+        self.selected_pen = QPen(QColor(0, 120, 255), 3)
+        
+        self.setPen(self.normal_pen)
+        self.setZValue(1)
+        
+        self._is_hovered = False
         # Initial path
-        self.update_path()
         self.net = net
-    
+        self.update_path()
     def update_path(self):
         """Update wire path connecting the TWO PIN POSITIONS"""
         if not self.is_connected:
@@ -74,18 +86,40 @@ class WireItem(QGraphicsPathItem):
         pen = QPen(self.color, 2)
         self.setPen(pen)
     
-    def paint(self, painter, option, widget):
-        """Custom paint to show selection"""
-        pen = self.pen()
-        if option.state & QStyle.State_Selected:
-            pen.setWidth(4)
-            pen.setColor(Qt.cyan)
-        else:
-            pen.setWidth(2)
-            pen.setColor(self.color)
+    def paint(self, painter, option, widget=None):
+        """Custom paint with glow effects and no selection rectangle"""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
         
-        painter.setPen(pen)
+        # Set pen based on state
+        if self.isSelected():
+            pen = QPen(self.selected_pen)
+            pen.setWidth(3)
+            painter.setPen(pen)
+        elif self._is_hovered:
+            pen = QPen(self.hover_pen)
+            pen.setWidth(3)
+            painter.setPen(pen)
+        else:
+            pen = QPen(self.normal_pen)
+            pen.setWidth(2)
+            painter.setPen(pen)
+        
         painter.drawPath(self.path())
+        painter.restore()
+    
+    def hoverEnterEvent(self, event):
+        """Yellow glow on hover"""
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        """Remove yellow glow"""
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
 
                     
 
@@ -97,8 +131,49 @@ class SegmentedWireItem(QGraphicsPathItem):
         self.setFlag(self.ItemIsSelectable)
         self.setZValue(2)  # Wires above segments
         self.main_window = None
+
+         # Visual properties
+        self.color = QColor(*wire.color_data.rgb)
+        self.normal_pen = QPen(self.color, 1.5)
+        self.hover_pen = QPen(QColor(255, 255, 0), 2.5)
+        self.selected_pen = QPen(QColor(0, 120, 255), 2.5)
+        
+        self.setPen(self.normal_pen)
+
+        self._is_hovered = False
+        self.setZValue(4)
         self.update_path()
+    def paint(self, painter, option, widget=None):
+        """Custom paint with glow effects"""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        if self.isSelected():
+            pen = QPen(self.selected_pen)
+            pen.setWidth(2.5)
+            painter.setPen(pen)
+        elif self._is_hovered:
+            pen = QPen(self.hover_pen)
+            pen.setWidth(2.5)
+            painter.setPen(pen)
+        else:
+            pen = QPen(self.normal_pen)
+            pen.setWidth(1.5)
+            painter.setPen(pen)
+        
+        painter.drawPath(self.path())
+        painter.restore()
     
+    def hoverEnterEvent(self, event):
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
     def set_main_window(self, window):
         self.main_window = window
     

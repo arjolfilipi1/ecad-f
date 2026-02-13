@@ -6,7 +6,7 @@ from graphics.topology_item import (
 from graphics.segment_item import SegmentGraphicsItem
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow,QGraphicsScene,QToolBar,QAction,QDialog,QVBoxLayout,QLabel,
-    QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog
+    QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog,QGraphicsItem
     
 )
 from PyQt5.QtGui import QCursor
@@ -48,22 +48,26 @@ class MainWindow(QMainWindow):
         
         self.show_props()
         self.view._scene.selectionChanged.connect(self.on_selection)
-        self._create_toolbar()
         netlist = Netlist()
         self.conns =[]
         self.wires = []
         net = Netlist()
         self.topology_manager = TopologyManager()
-        self._create_topology_toolbar()
         from utils.update_dispatcher import UpdateDispatcher
         self.update_dispatcher = UpdateDispatcher()
         self.update_dispatcher.connector_moved.connect(self.on_connector_moved)
         self.update_dispatcher.connector_rotated.connect(self.on_connector_moved)
         
         self.viz_manager = VisualizationManager(self)
-        self.viz_manager.create_toolbar()
-        self._create_test_menu()
-        self._create_import_toolbar()
+        self._create_main_toolbar()      # Basic editing tools
+        self._create_topology_toolbar()   # Topology/routing tools
+        self._create_import_toolbar()     # Import/export tools
+        self._create_view_toolbar()       # Visualization tools
+        
+        # Arrange toolbars in rows (default behavior)
+        self.addToolBarBreak()  # This forces next toolbar to new row
+        self._create_edit_toolbar()       # Edit operations
+
         
 
         # Demo objects
@@ -71,36 +75,105 @@ class MainWindow(QMainWindow):
         # self.create_harness_example()
         self.refresh_connector_labels()
         self.view._scene.selectionChanged.connect(self.on_scene_selection)
+    def undo(self):
+        """Undo last operation"""
+        if hasattr(self, 'undo_stack') and self.undo_stack:
+            command = self.undo_stack.pop()
+            command.undo()
+            self.redo_stack.append(command)
+    
+    def redo(self):
+        """Redo last undone operation"""
+        if hasattr(self, 'redo_stack') and self.redo_stack:
+            command = self.redo_stack.pop()
+            command.redo()
+            self.undo_stack.append(command)
+    
+    def select_all(self):
+        """Select all items in scene"""
+        for item in self.scene.items():
+            if item.flags() & QGraphicsItem.ItemIsSelectable:
+                item.setSelected(True)
+    
+    def clear_selection(self):
+        """Clear all selections"""
+        for item in self.scene.items():
+            item.setSelected(False)
+
+    def _create_view_toolbar(self):
+        """View and visualization tools (row 2, after import)"""
+        toolbar = QToolBar("View Tools")
+        toolbar.setObjectName("ViewToolBar")
+        toolbar.setMovable(True)
+        
+        # Use the visualization manager's toolbar creation
+        if hasattr(self, 'viz_manager'):
+            # Add visualization toggles
+            viz_actions = self.viz_manager.create_toolbar_actions()
+            for action in viz_actions:
+                toolbar.addAction(action)
+        
+        self.addToolBar(toolbar)
+        return toolbar
+    
+    def _create_edit_toolbar(self):
+        """Edit operations toolbar (row 3)"""
+        self.addToolBarBreak()
+        
+        toolbar = QToolBar("Edit Tools")
+        toolbar.setObjectName("EditToolBar")
+        toolbar.setMovable(True)
+        
+        # Undo/Redo
+        undo_act = QAction("↩ Undo", self)
+        undo_act.triggered.connect(self.undo)
+        toolbar.addAction(undo_act)
+        
+        redo_act = QAction("↪ Redo", self)
+        redo_act.triggered.connect(self.redo)
+        toolbar.addAction(redo_act)
+        
+        toolbar.addSeparator()
+        
+        # Selection tools
+        select_all = QAction("🔲 Select All", self)
+        select_all.triggered.connect(self.select_all)
+        toolbar.addAction(select_all)
+        
+        clear_sel = QAction("❌ Clear Selection", self)
+        clear_sel.triggered.connect(self.clear_selection)
+        toolbar.addAction(clear_sel)
+        
+        self.addToolBar(toolbar)
+        return toolbar
+
     def _create_import_toolbar(self):
-        """Create import and routing toolbar"""
-        tb = QToolBar("Import & Routing")
-        self.addToolBar(tb)
+        """Import and routing tools (row 2)"""
+        # Add toolbar break to start new row
+        self.addToolBarBreak()
+        
+        toolbar = QToolBar("Import & Routing")
+        toolbar.setObjectName("ImportToolBar")
+        toolbar.setMovable(True)
         
         # Import button
         import_btn = QAction("📥 Import Excel", self)
         import_btn.triggered.connect(self.import_from_excel)
-        tb.addAction(import_btn)
+        toolbar.addAction(import_btn)
         
         # Auto-route button
         route_btn = QAction("🔄 Create Branches", self)
         route_btn.triggered.connect(self.auto_route_wires)
-        tb.addAction(route_btn)
+        toolbar.addAction(route_btn)
         
         # Clear topology button
         clear_btn = QAction("🗑️ Clear Topology", self)
         clear_btn.triggered.connect(self.clear_topology)
-        tb.addAction(clear_btn)
+        toolbar.addAction(clear_btn)
         
-        tb.addSeparator()
-        
-        # Manual routing tools
-        add_bp_btn = QAction("➕ Branch Point", self)
-        add_bp_btn.triggered.connect(self.add_branch_point_manual)
-        tb.addAction(add_bp_btn)
-        
-        add_seg_btn = QAction("🔗 Add Segment", self)
-        add_seg_btn.triggered.connect(self.add_segment_manual)
-        tb.addAction(add_seg_btn)
+        self.addToolBar(toolbar)
+        return toolbar
+
 
     def create_harness_example(self):
         """Create a T-configuration harness with proper topology"""
@@ -225,11 +298,7 @@ class MainWindow(QMainWindow):
         # Add to tree views
         self.refresh_tree_views()
         
-        # Print topology info
-        
 
-
-    
     def refresh_tree_views(self):
         """Refresh tree widget contents - ONLY SHOW CONNECTORS AND ROUTED WIRES"""
         self.connectors_tree.clear()
@@ -277,8 +346,7 @@ class MainWindow(QMainWindow):
         print("test")
         for w in self.imported_wire_items:
             print(str(type(w)),w.wid)
-            # self.scene.removeItem(w)
-            # del w
+
     def import_from_excel(self):
         """Import Excel file with wires only (no topology)"""
         from PyQt5.QtWidgets import QFileDialog
@@ -379,30 +447,34 @@ class MainWindow(QMainWindow):
                 if hasattr(wire, 'graphics_item'):
                     wire.graphics_item.update_path()
     def _create_topology_toolbar(self):
-        """Add topology-specific tools"""
-        tb = self.findChild(QToolBar, "Tools")
-        if not tb:
-            return
-            
+        """Topology and routing tools (row 1, after main tools)"""
+        toolbar = QToolBar("Topology Tools")
+        toolbar.setObjectName("TopologyToolBar")
+        toolbar.setMovable(True)
+        
         # Add branch point tool
-        add_branch_btn = QAction("Add Branch Point", self)
-        add_branch_btn.triggered.connect(self.add_branch_point)
-        tb.addAction(add_branch_btn)
+        add_branch = QAction("⬤ Branch Point", self)
+        add_branch.triggered.connect(self.add_branch_point)
+        toolbar.addAction(add_branch)
         
         # Add junction tool
-        add_junction_btn = QAction("Add Junction", self)
-        add_junction_btn.triggered.connect(self.add_junction)
-        tb.addAction(add_junction_btn)
+        add_junction = QAction("◉ Junction", self)
+        add_junction.triggered.connect(self.add_junction)
+        toolbar.addAction(add_junction)
         
         # Add split segment tool
-        split_segment_btn = QAction("Split Segment", self)
-        split_segment_btn.triggered.connect(self.split_segment)
-        tb.addAction(split_segment_btn)
+        split_segment = QAction("✂️ Split", self)
+        split_segment.triggered.connect(self.split_segment)
+        toolbar.addAction(split_segment)
         
-        # Add wire through nodes tool
-        smart_wire_btn = QAction("Smart Wire", self)
-        smart_wire_btn.triggered.connect(self.create_smart_wire)
-        tb.addAction(smart_wire_btn)
+        # Add smart wire tool
+        smart_wire = QAction("⚡ Smart Wire", self)
+        smart_wire.triggered.connect(self.create_smart_wire)
+        toolbar.addAction(smart_wire)
+        
+        self.addToolBar(toolbar)
+        return toolbar
+
     def add_branch_point(self):
         """Add a branch point at mouse position"""
         pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
@@ -462,16 +534,17 @@ class MainWindow(QMainWindow):
                 via_nodes.append(node_item.junction_node)
             elif isinstance(node_item, BranchPointGraphicsItem):
                 via_nodes.append(node_item.branch_node)
-        
         # Create wire through topology
-        wire = self.topology_manager.create_wire_path(from_pin, to_pin, via_nodes)
-        
+        wire = self.topology_manager.route_wire(from_pin, to_pin, via_nodes)
+        if not wire:
+            self.statusBar().showMessage("Wire could not be created", 3000)
+            return    
         # Create graphics
         wire_graphics = SegmentedWireItem(wire)
         self.scene.addItem(wire_graphics)
         
         # Add to wires tree
-        item = QTreeWidgetItem([wire.wid])
+        item = QTreeWidgetItem([wire.id])
         item.setData(0, Qt.UserRole, wire_graphics)
         self.wires_tree.addTopLevelItem(item)
         wire_graphics.tree_item = item
@@ -545,20 +618,30 @@ class MainWindow(QMainWindow):
         scene.addItem(s1)
         scene.addItem(s2)
 
-    def _create_toolbar(self):
-        self.toolbar = QToolBar("Tools")
-
-        self.toolbar.addActions(self.view.tool_group.actions())
-        self.addToolBar(self.toolbar)
-        add_connetor = QAction("Add connetor", self)
-        add_connetor.triggered.connect(self.show_custom_dialog)
-        self.toolbar.addAction(add_connetor)
-        rotate = QAction("rotate", self)
+    def _create_main_toolbar(self):
+        """Main editing toolbar (row 1)"""
+        toolbar = QToolBar("Main Tools")
+        toolbar.setObjectName("MainToolBar")
+        toolbar.setMovable(True)  # Allow user to move/rearrange
+        
+        # Add existing tools from your original toolbar
+        toolbar.addActions(self.view.tool_group.actions())
+        
+        add_connector = QAction("➕ Connector", self)
+        add_connector.triggered.connect(self.show_custom_dialog)
+        toolbar.addAction(add_connector)
+        
+        rotate = QAction("🔄 Rotate", self)
         rotate.triggered.connect(self.rotate)
-        self.toolbar.addAction(rotate)
-        toggle_connector_info = QAction("Toggle connector info", self)
-        toggle_connector_info.triggered.connect(self.toggle_connector_info)
-        self.toolbar.addAction(toggle_connector_info)
+        toolbar.addAction(rotate)
+        
+        toggle_info = QAction("ℹ️ Toggle Info", self)
+        toggle_info.triggered.connect(self.toggle_connector_info)
+        toolbar.addAction(toggle_info)
+        
+        self.addToolBar(toolbar)
+        return toolbar
+
     def show_custom_dialog(self):
         # 3. Create and execute the Dialog
         dialog = QDialog(self)

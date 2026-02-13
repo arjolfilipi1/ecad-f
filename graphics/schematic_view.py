@@ -142,7 +142,10 @@ class SchematicView(QGraphicsView):
         pos = self.mapToScene(event.pos())
 
         if self.current_tool == Tool.ADD_CONNECTOR:
-            c = ConnectorItem( pos.x(), pos.y(), pin_count=2)
+            c = ConnectorItem( pos.x(), pos.y(), pins=[1,2])
+            c.set_topology_manager(self.parent.topology_manager)
+            c.set_main_window(self.parent)
+            c.create_topology_node()
             item = QTreeWidgetItem([c.cid])
             item.setData(0, Qt.UserRole, c)
 

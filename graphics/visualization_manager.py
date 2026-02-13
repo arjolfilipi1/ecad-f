@@ -50,127 +50,67 @@ class VisualizationManager:
         # Action references for state updates
         self.actions = {}
         
-    def create_toolbar(self) -> QToolBar:
-        """Create visualization toggle toolbar"""
+    def create_toolbar_actions(self):
+        """Create actions for visualization toolbar (without creating toolbar)"""
+        actions = []
+        
+        # Bundle toggle
+        self.bundle_action = QAction("📦 Bundles", self.main_window)
+        self.bundle_action.setCheckable(True)
+        self.bundle_action.setChecked(self.show_bundles)
+        self.bundle_action.triggered.connect(self.toggle_bundles)
+        self.bundle_action.setToolTip("Show/hide bundle segments")
+        actions.append(self.bundle_action)
+        
+        # Routed wires toggle
+        self.routed_action = QAction("🔄 Routed Wires", self.main_window)
+        self.routed_action.setCheckable(True)
+        self.routed_action.setChecked(self.show_routed_wires)
+        self.routed_action.triggered.connect(self.toggle_routed_wires)
+        self.routed_action.setToolTip("Show/hide routed wires")
+        actions.append(self.routed_action)
+        
+        # Direct wires toggle
+        self.direct_action = QAction("📏 Direct Wires", self.main_window)
+        self.direct_action.setCheckable(True)
+        self.direct_action.setChecked(self.show_direct_wires)
+        self.direct_action.triggered.connect(self.toggle_direct_wires)
+        self.direct_action.setToolTip("Show/hide original direct wires")
+        actions.append(self.direct_action)
+        
+        # Branch points toggle
+        self.branch_action = QAction("⬤ Branch Points", self.main_window)
+        self.branch_action.setCheckable(True)
+        self.branch_action.setChecked(self.show_branch_points)
+        self.branch_action.triggered.connect(self.toggle_branch_points)
+        self.branch_action.setToolTip("Show/hide branch points")
+        actions.append(self.branch_action)
+        
+        # Add separator
+        sep = QAction(self.main_window)
+        sep.setSeparator(True)
+        actions.append(sep)
+        
+        # Grid toggle
+        self.grid_action = QAction("▦ Grid", self.main_window)
+        self.grid_action.setCheckable(True)
+        self.grid_action.setChecked(self.show_grid)
+        self.grid_action.triggered.connect(self.toggle_grid)
+        self.grid_action.setToolTip("Show/hide background grid")
+        actions.append(self.grid_action)
+        
+        return actions
+    
+    def create_toolbar(self):
+        """Legacy method - creates full toolbar (keep for compatibility)"""
         toolbar = QToolBar("Visualization")
         self.main_window.addToolBar(toolbar)
         
-        # ============ ELEMENT TOGGLES ============
-        toolbar.addAction(self._create_action(
-            "Show Bundles", 
-            "Show bundle segments",
-            self.toggle_bundles,
-            checkable=True, 
-            checked=True,
-            icon="📦"
-        ))
-        
-        toolbar.addAction(self._create_action(
-            "Show Routed Wires", 
-            "Show routed wires (through topology)",
-            self.toggle_routed_wires,
-            checkable=True, 
-            checked=True,
-            icon="🔄"
-        ))
-        
-        toolbar.addAction(self._create_action(
-            "Show Original Wires", 
-            "Show original direct wires (imported)",
-            self.toggle_direct_wires,
-            checkable=True, 
-            checked=False,
-            icon="📏"
-        ))
-        
-        toolbar.addAction(self._create_action(
-            "Show Branch Points", 
-            "Show branch points and junctions",
-            self.toggle_branch_points,
-            checkable=True, 
-            checked=True,
-            icon="⬤"
-        ))
-        
-        toolbar.addAction(self._create_action(
-            "Show Connector Info", 
-            "Show connector information labels",
-            self.toggle_connector_info,
-            checkable=True, 
-            checked=True,
-            icon="ℹ️"
-        ))
-        
-        toolbar.addSeparator()
-        
-        # ============ PRESET MODES ============
-        mode_group = QActionGroup(self.main_window)
-        mode_group.setExclusive(True)
-        
-        # Create mode actions
-        mode_all = self._create_action(
-            "All", "Show all elements",
-            lambda: self.set_mode(VisualizationMode.ALL),
-            checkable=True, checked=True,
-            icon="👁️"
-        )
-        mode_group.addAction(mode_all)
-        toolbar.addAction(mode_all)
-        
-        mode_bundles = self._create_action(
-            "Bundles Only", "Show only bundle segments",
-            lambda: self.set_mode(VisualizationMode.BUNDLES_ONLY),
-            checkable=True, checked=False,
-            icon="📦"
-        )
-        mode_group.addAction(mode_bundles)
-        toolbar.addAction(mode_bundles)
-        
-        mode_routed = self._create_action(
-            "Routed Wires", "Show only routed wires",
-            lambda: self.set_mode(VisualizationMode.ROUTED_WIRES_ONLY),
-            checkable=True, checked=False,
-            icon="🔄"
-        )
-        mode_group.addAction(mode_routed)
-        toolbar.addAction(mode_routed)
-        
-        mode_direct = self._create_action(
-            "Direct Wires", "Show only original direct wires",
-            lambda: self.set_mode(VisualizationMode.DIRECT_WIRES_ONLY),
-            checkable=True, checked=False,
-            icon="📏"
-        )
-        mode_group.addAction(mode_direct)
-        toolbar.addAction(mode_direct)
-        
-        mode_manufacturing = self._create_action(
-            "Manufacturing", "Manufacturing formboard view",
-            lambda: self.set_mode(VisualizationMode.MANUFACTURING),
-            checkable=True, checked=False,
-            icon="🏭"
-        )
-        mode_group.addAction(mode_manufacturing)
-        toolbar.addAction(mode_manufacturing)
-        
-        toolbar.addSeparator()
-        
-        # ============ UTILITIES ============
-        toolbar.addAction(self._create_action(
-            "Toggle Grid", "Show/hide background grid",
-            self.toggle_grid,
-            checkable=True, checked=True,
-            icon="▦"
-        ))
-        
-        toolbar.addAction(self._create_action(
-            "Debug View", "Show debug information",
-            self.toggle_debug,
-            checkable=True, checked=False,
-            icon="🐛"
-        ))
+        for action in self.create_toolbar_actions():
+            toolbar.addAction(action)
         
         return toolbar
+
     
     def _create_action(self, text, tooltip, slot, checkable=False, checked=False, icon=None):
         """Helper to create consistent actions"""

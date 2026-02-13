@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsPathItem, 
     QGraphicsItem, QGraphicsTextItem
 )
-from PyQt5.QtGui import QPainterPath, QPen, QBrush, QColor
+from PyQt5.QtGui import QPainterPath, QPen, QBrush, QColor, QPainter
 from PyQt5.QtCore import Qt, QPointF
 from model.topology import JunctionNode, BranchPointNode, WireSegment
 
@@ -13,10 +13,48 @@ class JunctionGraphicsItem(QGraphicsEllipseItem):
         super().__init__(-5, -5, 10, 10)
         self.junction_node = junction_node
         self.setPos(*junction_node.position)
-        self.setBrush(QBrush(QColor(100, 100, 100)))
-        self.setFlag(self.ItemIsMovable)
-        self.setFlag(self.ItemIsSelectable)
-        self.setFlag(self.ItemSendsGeometryChanges)
+        self.setFlag(self.ItemIsSelectable, True)
+        self.setFlag(self.ItemIsFocusable, True)
+        self.setAcceptHoverEvents(True)
+        
+        self.normal_brush = QBrush(QColor(100, 100, 100))
+        self.normal_pen = QPen(Qt.black, 1)
+        self.hover_pen = QPen(QColor(255, 255, 0), 2)
+        self.selected_pen = QPen(QColor(0, 120, 255), 2)
+        
+        self.setBrush(self.normal_brush)
+        self.setPen(self.normal_pen)
+        self.setZValue(4)
+        
+        self._is_hovered = False
+    
+    def paint(self, painter, option, widget=None):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        if self.isSelected():
+            painter.setPen(self.selected_pen)
+            painter.setBrush(self.brush())
+        elif self._is_hovered:
+            painter.setPen(self.hover_pen)
+            painter.setBrush(self.brush())
+        else:
+            painter.setPen(self.normal_pen)
+            painter.setBrush(self.brush())
+        
+        painter.drawEllipse(self.rect())
+        painter.restore()
+    
+    def hoverEnterEvent(self, event):
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
         
     def itemChange(self, change, value):
         if change == self.ItemPositionHasChanged:
@@ -35,16 +73,55 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         self.branch_node = branch_node
         self.setPos(*branch_node.position)
         
-        # Color based on type
+        # Enable selection and hover
+        self.setFlag(self.ItemIsSelectable, True)
+        self.setFlag(self.ItemIsFocusable, True)
+        self.setAcceptHoverEvents(True)
+        
+        # Visual properties
         if branch_node.branch_type == "splice":
-            self.setBrush(QBrush(QColor(200, 150, 50)))  # Gold for splice
+            self.normal_brush = QBrush(QColor(200, 150, 50))
         else:
-            self.setBrush(QBrush(QColor(150, 200, 100)))  # Green for branch
+            self.normal_brush = QBrush(QColor(150, 200, 100))
         
-        self.setFlag(self.ItemIsMovable)
-        self.setFlag(self.ItemIsSelectable)
-        self.setFlag(self.ItemSendsGeometryChanges)
+        self.normal_pen = QPen(Qt.black, 1)
+        self.hover_pen = QPen(QColor(255, 255, 0), 2)
+        self.selected_pen = QPen(QColor(0, 120, 255), 2)
         
+        self.setBrush(self.normal_brush)
+        self.setPen(self.normal_pen)
+        self.setZValue(3)
+        
+        self._is_hovered = False
+
+    def paint(self, painter, option, widget=None):
+        """Custom paint with glow effects"""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        if self.isSelected():
+            painter.setPen(self.selected_pen)
+            painter.setBrush(self.brush())
+        elif self._is_hovered:
+            painter.setPen(self.hover_pen)
+            painter.setBrush(self.brush())
+        else:
+            painter.setPen(self.normal_pen)
+            painter.setBrush(self.brush())
+        
+        painter.drawEllipse(self.rect())
+        painter.restore()
+    
+    def hoverEnterEvent(self, event):
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
     def itemChange(self, change, value):
         if change == self.ItemPositionHasChanged:
             self.branch_node.position = (self.pos().x(), self.pos().y())

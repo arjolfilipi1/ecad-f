@@ -1,19 +1,56 @@
 #graphics/segment_item
 from PyQt5.QtWidgets import QGraphicsPathItem, QStyle
 from PyQt5.QtCore import  QPointF,Qt
-from PyQt5.QtGui import QPainterPath,QPen, QColor
+from PyQt5.QtGui import QPainterPath,QPen, QColor, QPainter
 class SegmentGraphicsItem(QGraphicsPathItem):
     def __init__(self, segment, topology_manager=None):
         super().__init__()
         self.segment = segment
         self.topology_manager = topology_manager
-        self.setFlag(self.ItemIsSelectable)
+        # Enable selection and hover
+        self.setFlag(self.ItemIsSelectable, True)
+        self.setFlag(self.ItemIsFocusable, True)
+        self.setAcceptHoverEvents(True)
         
-        # Store reference back to segment
         segment.graphics_item = self
+        self._is_hovered = False
+
         
         self.update_path()
         self.update_appearance()
+    def paint(self, painter, option, widget=None):
+        """Custom paint with glow effects"""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Get base pen from appearance
+        base_pen = self.pen()
+        
+        # Modify based on state
+        if self.isSelected():
+            pen = QPen(QColor(0, 120, 255), base_pen.width() + 1)
+            pen.setStyle(base_pen.style())
+            painter.setPen(pen)
+        elif self._is_hovered:
+            pen = QPen(QColor(255, 255, 0), base_pen.width() + 1)
+            pen.setStyle(base_pen.style())
+            painter.setPen(pen)
+        else:
+            painter.setPen(base_pen)
+        
+        painter.drawPath(self.path())
+        painter.restore()
+    
+    def hoverEnterEvent(self, event):
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
     
     def update_path(self):
         """Update segment path based on node positions"""
