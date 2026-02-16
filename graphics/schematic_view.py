@@ -161,43 +161,39 @@ class SchematicView(QGraphicsView):
 
         else:
             super().mousePressEvent(event)
+    def set_grid_visible(self, visible: bool):
+        """Set grid visibility"""
+        self._show_grid = visible
+        self.update()
     
+    def set_grid_size(self, size: int):
+        """Set grid spacing"""
+        self.GRID = size
+        self.update()
+    
+    def drawBackground(self, painter, rect):
+        """Draw background with grid"""
+        if not hasattr(self, '_show_grid') or self._show_grid:
+            # Your existing grid drawing code
+            painter.setPen(QPen(Qt.lightGray, 0))
+            
+            left = rect.left() - (rect.left() % self.GRID)
+            top = rect.top() - (rect.top() % self.GRID)
+            
+            x = left
+            while x < rect.right():
+                painter.drawLine(QLineF(x, rect.top(), x, rect.bottom()))
+                x += self.GRID
+            
+            y = top
+            while y < rect.bottom():
+                painter.drawLine(QLineF(rect.left(), y, rect.right(), y))
+                y += self.GRID
+        
+        # Always draw origin cross
+        painter.setPen(QPen(Qt.red, 1))
+        painter.drawLine(QLineF(-20, 0, 20, 0))
+        painter.drawLine(QLineF(0, -20, 0, 20))
+
 from PyQt5.QtWidgets import QWidget, QFormLayout, QLineEdit
 
-class PropertiesWidget(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.layout = QFormLayout(self)
-        self.current_item = None
-        self.type_label = QLabel("")
-        self.id_edit = QLineEdit()
-        self.layout.addRow("Type", self.type_label)
-        self.layout.addRow("ID", self.id_edit)
-
-        self.id_edit.textChanged.connect(self.update_item)
-
-    def set_item(self, item):
-        self.current_item = item
-        self.type_label.setText(str(type(item)))
-        if hasattr(item, "cid"):
-            self.id_edit.setText(item.cid)
-        elif hasattr(item, "wid"):
-            self.id_edit.setText(item.wid)
-
-    def update_item(self, text):
-        if self.current_item:
-            if hasattr(self.current_item, "cid"):
-                self.current_item.cid = text
-            elif hasattr(self.current_item, "wid"):
-                self.current_item.wid = text
-
-
-
-
-
-class PropertiesDock(QDockWidget):
-    def __init__(self):
-        super().__init__("Properties")
-        self.widget = PropertiesWidget()
-        self.setWidget(self.widget)
-        

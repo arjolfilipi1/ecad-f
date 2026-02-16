@@ -9,8 +9,8 @@ from PyQt5.QtWidgets import (
     QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog,QGraphicsItem
     
 )
-from PyQt5.QtGui import QCursor
-from graphics.schematic_view import SchematicView,PropertiesDock
+from PyQt5.QtGui import QCursor,QPainter
+from graphics.schematic_view import SchematicView
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import SegmentedWireItem,WireItem
 # from graphics.wire_item import WireItem
@@ -68,7 +68,13 @@ class MainWindow(QMainWindow):
         self.addToolBarBreak()  # This forces next toolbar to new row
         self._create_edit_toolbar()       # Edit operations
 
-        
+        # Initialize settings manager
+        from utils.settings_manager import SettingsManager
+        self.settings_manager = SettingsManager()
+        self._create_tools_menu()
+        # Apply theme
+        self.setStyleSheet(self.settings_manager.get_theme_stylesheet())
+
 
         # Demo objects
         
@@ -170,7 +176,7 @@ class MainWindow(QMainWindow):
         clear_btn = QAction("🗑️ Clear Topology", self)
         clear_btn.triggered.connect(self.clear_topology)
         toolbar.addAction(clear_btn)
-        
+
         self.addToolBar(toolbar)
         return toolbar
 
@@ -571,23 +577,39 @@ class MainWindow(QMainWindow):
             self.view.centerOn(obj)
 
     def show_props(self):
-        self.props = PropertiesDock()
+        """Create and show property editor dock"""
+        from graphics.property_editor import PropertyEditor
+        
+        self.props = QDockWidget("Properties")
+        self.property_editor = PropertyEditor(self)
+        self.props.setWidget(self.property_editor)
         self.addDockWidget(Qt.RightDockWidgetArea, self.props)
-    def on_selection(self):
+        
+        # Connect selection changes to property editor
+        self.view._scene.selectionChanged.connect(self.on_selection_changed)
+
+    def on_selection_changed(self):
+        """Update property editor when selection changes"""
         items = self.view._scene.selectedItems()
-        if len(items) > 0 and hasattr( items[0],"net"):
+        if items:
+            self.property_editor.set_item(items[0])
+        else:
+            self.property_editor.set_item(None)
+
+    def on_selection(self):
+        """Your existing on_selection method - keep for other functionality"""
+        items = self.view._scene.selectedItems()
+        if len(items) > 0 and hasattr(items[0], "net"):
             for cp in items[0].net.connection_points:
                 cp.setBrush(Qt.red)
-        if items:
-            self.props.widget.set_item(items[0])
-            if isinstance( items[0],ConnectorItem):
-                print((items[0].cid))
-                for pin in items[0].pins:
-                    print(pin.pid)
-                    for wire in pin.wires:
-                        print(type(wire),wire.wid)
-        else:
-            self.props.widget.set_item(None)
+        
+        # Update property editor
+        if hasattr(self, 'property_editor'):
+            if items:
+                self.property_editor.set_item(items[0])
+            else:
+                self.property_editor.set_item(None)
+
         
     def toggle_connector_info(self):
         for item in self.scene.items():
@@ -638,7 +660,13 @@ class MainWindow(QMainWindow):
         toggle_info = QAction("ℹ️ Toggle Info", self)
         toggle_info.triggered.connect(self.toggle_connector_info)
         toolbar.addAction(toggle_info)
+        # Add settings button at the end
+        toolbar.addSeparator()
         
+        settings_btn = QAction("⚙️ Settings", self)
+        settings_btn.triggered.connect(self.show_settings)
+        toolbar.addAction(settings_btn)
+
         self.addToolBar(toolbar)
         return toolbar
 
@@ -660,6 +688,92 @@ class MainWindow(QMainWindow):
             if getattr(item, "rotate_90", None):
                 item.rotate_90()
         
+    def show_settings(self):
+        """Show settings dialog"""
+        from dialogs.settings_dialog import SettingsDialog
+        
+        dialog = SettingsDialog(self.settings_manager, self)
+        dialog.settings_changed.connect(self.on_settings_changed)
+        
+        if dialog.exec_():
+            # Settings already applied in dialog.accept()
+            pass
+
+    def on_settings_changed(self):
+        """Handle settings changes"""
+        # Apply theme
+        self.setStyleSheet(self.settings_manager.get_theme_stylesheet())
+        
+        # Update grid visibility
+        self.view.set_grid_visible(self.settings_manager.get('show_grid', True))
+        self.view.set_grid_size(self.settings_manager.get('grid_size', 50))
+        
+        # Update connector labels
+        for conn in self.conns:
+            if hasattr(conn, 'info'):
+                conn.info.setVisible(self.settings_manager.get('show_connector_labels', True))
+        
+        # Update antialiasing
+        self.view.setRenderHint(QPainter.Antialiasing, 
+                               self.settings_manager.get('antialiasing', True))
+        
+        # Update status bar
+        self.statusBar().showMessage("Settings updated", 3000)
+    def _create_tools_menu(self):
+        """Add Connector Database Manager to tools menu"""
+        menubar = self.menuBar()
+        
+        # Create Tools menu if it doesn't exist
+        tools_menu = None
+        for action in menubar.actions():
+            if action.text() == "&Tools":
+                tools_menu = action.menu()
+                break
+        
+        if not tools_menu:
+            tools_menu = menubar.addMenu("&Tools")
+        
+        # Add connector database action
+        db_action = QAction("Connector Database Manager", self)
+        db_action.triggered.connect(self.launch_connector_manager)
+        tools_menu.addAction(db_action)
+        
+        # Add separator and settings
+        tools_menu.addSeparator()
+        settings_action = QAction("Settings...", self)
+        settings_action.triggered.connect(self.show_settings)
+        tools_menu.addAction(settings_action)
+
+    def launch_connector_manager(self):
+        """Launch the standalone connector database manager"""
+        import subprocess
+        import sys
+        from pathlib import Path
+        
+        # Get path to connector_manager.py
+        manager_path = Path(__file__).parent / "connector_manager.py"
+        
+        if not manager_path.exists():
+            QMessageBox.critical(
+                self,
+                "File Not Found",
+                f"Connector manager not found at:\n{manager_path}"
+            )
+            return
+        
+        # Get database path from settings
+        db_path = self.settings_manager.get('database_path', 'connectors.db')
+        
+        # Launch as separate process
+        try:
+            subprocess.Popen([sys.executable, str(manager_path), db_path])
+            self.statusBar().showMessage("Connector Database Manager launched", 3000)
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Launch Failed",
+                f"Failed to launch connector manager:\n{str(e)}"
+            )
 
 app = QApplication(sys.argv)
 window = MainWindow()
