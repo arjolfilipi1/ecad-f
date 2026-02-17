@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Tuple, NamedTuple, Any
 import json
 from datetime import datetime
 import math
-
+import uuid
 
 class GermanWireColor(NamedTuple):
     """Standard German automotive wire colors with RGB values"""
@@ -256,6 +256,7 @@ class Wire:
     signal_name: Optional[str] = None
     part_number: Optional[str] = None
     notes: Optional[str] = None
+    cross_section:Optional[float] = None
     
     def to_dict(self) -> dict:
         return {
@@ -270,7 +271,8 @@ class Wire:
             'calculated_length_mm': self.calculated_length_mm,
             'signal_name': self.signal_name,
             'part_number': self.part_number,
-            'notes': self.notes
+            'notes': self.notes,
+            'cross_section': self.cross_section
         }
     
     @classmethod
@@ -287,7 +289,8 @@ class Wire:
             calculated_length_mm=data.get('calculated_length_mm'),
             signal_name=data.get('signal_name'),
             part_number=data.get('part_number'),
-            notes=data.get('notes')
+            notes=data.get('notes'),
+            cross_section=data.get('cross_section')
         )
 
 @dataclass

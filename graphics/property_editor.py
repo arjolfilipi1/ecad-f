@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit,
                              QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
                              QGroupBox, QPushButton, QLabel, QScrollArea,
                              QTabWidget, QTextEdit,QHBoxLayout)
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal,QPointF
 from PyQt5.QtGui import QColor,QPainter
 from model.models import Connector, Wire, Pin, CombinedWireColor
 from model.models import ConnectorType, Gender, SealType, WireType
@@ -29,6 +29,7 @@ class PropertyEditor(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.content = QWidget()
+        self.content.setObjectName("properties")
         self.content_layout = QVBoxLayout(self.content)
         self.db_btn = None
         # No selection label
@@ -407,21 +408,51 @@ class PropertyEditor(QWidget):
     
     def on_property_change(self, property_name, value):
         """Handle property changes"""
-        if self.current_item:
-            # Store the new value in the item
+        if self.current_item and self.main_window:
+            # Store old value
+            old_value = getattr(self.current_item, property_name, None)
+            
+            if old_value == value:
+                return
+            
+            # Apply change immediately (for visual feedback)
             setattr(self.current_item, property_name, value)
-            # Emit signal for undo/redo
-            self.property_changed.emit(property_name, value)
+            
+            # Create undo command
+            if hasattr(self.current_item, 'cid'):  # Connector
+                from commands.connector_commands import UpdateConnectorPropertiesCommand
+                cmd = UpdateConnectorPropertiesCommand(
+                    self.current_item,
+                    {property_name: old_value},
+                    {property_name: value}
+                )
+            elif hasattr(self.current_item, 'wid'):  # Wire
+                from commands.wire_commands import UpdateWirePropertiesCommand
+                cmd = UpdateWirePropertiesCommand(
+                    self.current_item,
+                    {property_name: old_value},
+                    {property_name: value}
+                )
+            else:
+                return
+            
+            self.main_window.undo_manager.push(cmd)
+
     
     def on_position_change(self, coord, value):
         """Handle position changes"""
-        if self.current_item:
-            pos = self.current_item.pos()
-            if coord == 'x':
-                self.current_item.setPos(value, pos.y())
-            else:
-                self.current_item.setPos(pos.x(), value)
-            self.property_changed.emit(f'pos_{coord}', value)
+        if self.current_item and self.main_window:
+            old_pos = self.current_item.pos()
+            new_pos = QPointF(
+                value if coord == 'x' else old_pos.x(),
+                value if coord == 'y' else old_pos.y()
+            )
+            
+            # Create move command
+            from commands.connector_commands import MoveConnectorCommand
+            cmd = MoveConnectorCommand(self.current_item, old_pos, new_pos)
+            self.main_window.undo_manager.push(cmd)
+
 
     def select_connector_from_db(self, connector_item):
         """Open database selector and apply selected connector"""

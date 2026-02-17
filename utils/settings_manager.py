@@ -259,12 +259,15 @@ class SettingsManager:
         }
         QDockWidget {
             color: #f0f0f0;
+
+            
             titlebar-close-icon: url(close.png);
             titlebar-normal-icon: url(undock.png);
         }
         QAction{
             color: #f0f0f0;
         }
+        
         QToolBar {
             background-color: #3c3c3c;
             border: 1px solid #555555;
@@ -316,10 +319,12 @@ class SettingsManager:
             padding: 0 5px 0 5px;
         }
         QTabWidget::pane {
+        
             border: 1px solid #555555;
             background-color: #252526;
         }
         QTabBar::tab {
+        
             background-color: #3c3c3c;
             border: 1px solid #555555;
             color: #f0f0f0;
@@ -337,6 +342,10 @@ class SettingsManager:
         }
         QRadioButton {
             color: #f0f0f0;
+        }
+        QWidget#properties{
+            color: black;
+            background-color: #2d2d30;
         }
         """
     

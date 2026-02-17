@@ -6,10 +6,11 @@ from graphics.topology_item import (
 from graphics.segment_item import SegmentGraphicsItem
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow,QGraphicsScene,QToolBar,QAction,QDialog,QVBoxLayout,QLabel,
-    QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog,QGraphicsItem
+    QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog,QGraphicsItem,QInputDialog,
+    QShortcut
     
 )
-from PyQt5.QtGui import QCursor,QPainter
+from PyQt5.QtGui import QCursor,QPainter,QKeySequence
 from graphics.schematic_view import SchematicView
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import SegmentedWireItem,WireItem
@@ -17,15 +18,17 @@ from graphics.wire_item import SegmentedWireItem,WireItem
 from model.netlist import Netlist
 import sys
 from PyQt5.QtCore import Qt,QFile, QTextStream
-
+from model.models import (
+    WiringHarness,NodeType,ConnectorType,SealType,Gender)
 from graphics.visualization_manager import VisualizationManager,VisualizationMode
-
-
+from pathlib import Path
+from commands.base_command import BaseCommand
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.undo_stack = []
-        self.redo_stack = []
+
+        from commands.undo_manager import UndoManager
+        self.undo_manager = UndoManager(self)
         self.scene = QGraphicsScene(-2000, -2000, 4000, 4000)
         self.view = SchematicView(self.scene,self)
         self.setCentralWidget(self.view)
@@ -51,7 +54,6 @@ class MainWindow(QMainWindow):
         netlist = Netlist()
         self.conns =[]
         self.wires = []
-        net = Netlist()
         self.topology_manager = TopologyManager()
         from utils.update_dispatcher import UpdateDispatcher
         self.update_dispatcher = UpdateDispatcher()
@@ -67,11 +69,40 @@ class MainWindow(QMainWindow):
         # Arrange toolbars in rows (default behavior)
         self.addToolBarBreak()  # This forces next toolbar to new row
         self._create_edit_toolbar()       # Edit operations
-
+        
         # Initialize settings manager
         from utils.settings_manager import SettingsManager
         self.settings_manager = SettingsManager()
+        self._create_file_menu()
         self._create_tools_menu()
+        self._create_test_menu()
+        # Add project handler
+        from database.project_db import ProjectFileHandler
+        self.project_handler = ProjectFileHandler()
+        
+        # Create file menu
+        
+        self.undo_manager.undo_stack.canRedoChanged.connect(self.set_undo_redo)
+        self.undo_manager.undo_stack.canUndoChanged.connect(self.set_undo_redo)
+        # Update edit menu/toolbar
+        self._create_undo_redo_actions()
+        # Delete key
+        delete_shortcut = QShortcut(QKeySequence.Delete, self)
+        delete_shortcut.activated.connect(self.delete_selected_with_undo)
+        
+        # Ctrl+A for select all
+        select_all_shortcut = QShortcut(QKeySequence.SelectAll, self)
+        select_all_shortcut.activated.connect(self.select_all)
+        
+        # Ctrl+Z for undo (already handled by action)
+        # Ctrl+Y for redo (already handled by action)
+        
+        # Space to toggle selection mode
+        # space_shortcut = QShortcut(Qt.Key_Space, self)
+        # space_shortcut.activated.connect(self.toggle_selection_mode)
+
+        
+        
         # Apply theme
         self.setStyleSheet(self.settings_manager.get_theme_stylesheet())
 
@@ -81,19 +112,7 @@ class MainWindow(QMainWindow):
         # self.create_harness_example()
         self.refresh_connector_labels()
         self.view._scene.selectionChanged.connect(self.on_scene_selection)
-    def undo(self):
-        """Undo last operation"""
-        if hasattr(self, 'undo_stack') and self.undo_stack:
-            command = self.undo_stack.pop()
-            command.undo()
-            self.redo_stack.append(command)
     
-    def redo(self):
-        """Redo last undone operation"""
-        if hasattr(self, 'redo_stack') and self.redo_stack:
-            command = self.redo_stack.pop()
-            command.redo()
-            self.undo_stack.append(command)
     
     def select_all(self):
         """Select all items in scene"""
@@ -121,7 +140,15 @@ class MainWindow(QMainWindow):
         
         self.addToolBar(toolbar)
         return toolbar
-    
+    def set_undo_redo(self):
+        if self.undo_manager.undo_stack.canRedo():
+            self.redo_act.setEnabled(True)
+        else:
+            self.redo_act.setEnabled(False)
+        if self.undo_manager.undo_stack.canUndo():
+            self.undo_act.setEnabled(True)
+        else:
+            self.undo_act.setEnabled(False)
     def _create_edit_toolbar(self):
         """Edit operations toolbar (row 3)"""
         self.addToolBarBreak()
@@ -131,13 +158,13 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(True)
         
         # Undo/Redo
-        undo_act = QAction("↩ Undo", self)
-        undo_act.triggered.connect(self.undo)
-        toolbar.addAction(undo_act)
+        self.undo_act = QAction("↩ Undo", self)
+        self.undo_act.triggered.connect(self.undo_manager.undo)
+        toolbar.addAction(self.undo_act)
         
-        redo_act = QAction("↪ Redo", self)
-        redo_act.triggered.connect(self.redo)
-        toolbar.addAction(redo_act)
+        self.redo_act = QAction("↪ Redo", self)
+        self.redo_act.triggered.connect(self.undo_manager.redo)
+        toolbar.addAction(self.redo_act)
         
         toolbar.addSeparator()
         
@@ -338,21 +365,16 @@ class MainWindow(QMainWindow):
             tree = obj.tree_item.treeWidget()
             tree.setCurrentItem(obj.tree_item)
             
-            # If it's a connector, show its pins
-            if isinstance(obj, ConnectorItem):
-                print(f"\nSelected {obj.cid}:")
-                for pin in obj.pins:
-                    pos = pin.scene_position()
-                    print(f"  {pin.pid} at {pos}")
+
     def _create_test_menu(self):
         import_action = QAction("test", self)
         import_action.triggered.connect(self.delete_wires)
         self.toolbar.addAction(import_action)
+        
     def delete_wires(self):
-        print("test")
-        for w in self.imported_wire_items:
-            print(str(type(w)),w.wid)
-
+        print("undo",self.undo_manager.undo_stack.count())
+        print("self",self.undo_stack)
+    
     def import_from_excel(self):
         """Import Excel file with wires only (no topology)"""
         from PyQt5.QtWidgets import QFileDialog
@@ -410,6 +432,7 @@ class MainWindow(QMainWindow):
                     self.viz_manager.set_mode(VisualizationMode.BUNDLES_ONLY)
             else:
                 self.statusBar().showMessage("Auto-routing failed", 3000)
+                
     def clear_topology(self):
         """Remove all branch points and segments, keep connectors and wires"""
         if hasattr(self, 'auto_router'):
@@ -432,26 +455,7 @@ class MainWindow(QMainWindow):
         
         self.manual_router.create_segment_between_selected()
 
-    def on_connector_moved(self, connector):
-        """Handle connector movement updates"""
-        if connector.topology_node:
-            # Update node position
-            connector.topology_node.position = (
-                connector.pos().x(), 
-                connector.pos().y()
-            )
-            
-            # Update all segments connected to this node
-            for segment in self.topology_manager.segments.values():
-                if (segment.start_node == connector.topology_node or 
-                    segment.end_node == connector.topology_node):
-                    if hasattr(segment, 'graphics_item'):
-                        segment.graphics_item.update_path()
-            
-            # Update all wires in connected segments
-            for wire in self.wires:
-                if hasattr(wire, 'graphics_item'):
-                    wire.graphics_item.update_path()
+
     def _create_topology_toolbar(self):
         """Topology and routing tools (row 1, after main tools)"""
         toolbar = QToolBar("Topology Tools")
@@ -642,33 +646,33 @@ class MainWindow(QMainWindow):
 
     def _create_main_toolbar(self):
         """Main editing toolbar (row 1)"""
-        toolbar = QToolBar("Main Tools")
-        toolbar.setObjectName("MainToolBar")
-        toolbar.setMovable(True)  # Allow user to move/rearrange
+        self.toolbar = QToolBar("Main Tools")
+        self.toolbar.setObjectName("MainToolBar")
+        self.toolbar.setMovable(True)  # Allow user to move/rearrange
         
         # Add existing tools from your original toolbar
-        toolbar.addActions(self.view.tool_group.actions())
+        self.toolbar.addActions(self.view.tool_group.actions())
         
         add_connector = QAction("➕ Connector", self)
         add_connector.triggered.connect(self.show_custom_dialog)
-        toolbar.addAction(add_connector)
+        self.toolbar.addAction(add_connector)
         
         rotate = QAction("🔄 Rotate", self)
         rotate.triggered.connect(self.rotate)
-        toolbar.addAction(rotate)
+        self.toolbar.addAction(rotate)
         
         toggle_info = QAction("ℹ️ Toggle Info", self)
         toggle_info.triggered.connect(self.toggle_connector_info)
-        toolbar.addAction(toggle_info)
+        self.toolbar.addAction(toggle_info)
         # Add settings button at the end
-        toolbar.addSeparator()
+        self.toolbar.addSeparator()
         
         settings_btn = QAction("⚙️ Settings", self)
         settings_btn.triggered.connect(self.show_settings)
-        toolbar.addAction(settings_btn)
+        self.toolbar.addAction(settings_btn)
 
-        self.addToolBar(toolbar)
-        return toolbar
+        self.addToolBar(self.toolbar)
+        return self.toolbar
 
     def show_custom_dialog(self):
         # 3. Create and execute the Dialog
@@ -774,6 +778,542 @@ class MainWindow(QMainWindow):
                 "Launch Failed",
                 f"Failed to launch connector manager:\n{str(e)}"
             )
+    def _create_file_menu(self):
+        """Create File menu with save/load operations"""
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu("&File")
+        
+        # New project
+        new_action = QAction("&New Project", self)
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self.new_project)
+        file_menu.addAction(new_action)
+        
+        # Open project
+        open_action = QAction("&Open Project...", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.open_project)
+        file_menu.addAction(open_action)
+        
+        # Save project
+        save_action = QAction("&Save", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.save_project)
+        file_menu.addAction(save_action)
+        
+        # Save As
+        save_as_action = QAction("Save &As...", self)
+        save_as_action.setShortcut("Ctrl+Shift+S")
+        save_as_action.triggered.connect(self.save_project_as)
+        file_menu.addAction(save_as_action)
+        
+        file_menu.addSeparator()
+        
+        # Recent files
+        self.recent_menu = file_menu.addMenu("Recent Projects")
+        self._update_recent_menu()
+        
+        file_menu.addSeparator()
+        
+        # Export submenu
+        export_menu = file_menu.addMenu("Export")
+        
+        export_excel = QAction("Export to Excel...", self)
+        export_excel.triggered.connect(self.export_to_excel)
+        export_menu.addAction(export_excel)
+        
+        export_hdt = QAction("Harness Drawing Table...", self)
+        export_hdt.triggered.connect(self.export_hdt)
+        export_menu.addAction(export_hdt)
+        
+        file_menu.addSeparator()
+        
+        # Exit
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+    def new_project(self):
+        """Create a new project"""
+        # Check if current project has unsaved changes
+        if self.project_handler.modified:
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "Current project has unsaved changes. Create new anyway?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        
+        # Ask for project name
+        name, ok = QInputDialog.getText(self, "New Project", "Project Name:")
+        if ok and name:
+            # Clear current scene
+            self.scene.clear()
+            self.conns = []
+            self.wires = []
+            
+            # Create new project
+            self.project_handler.new_project(name)
+            self.setWindowTitle(f"ECAD - {name}")
+            
+            self.statusBar().showMessage(f"Created new project: {name}", 3000)
+
+    def open_project(self,*args):
+        """Open an existing project"""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Project",
+            str(Path.home()),
+            "ECAD Projects (*.ecad);;All Files (*)"
+        )
+        
+        if filepath:
+            # Clear current scene
+            self.scene.clear()
+            self.conns = []
+            self.wires = []
+            
+            # Load project
+            project = self.project_handler.open_project(filepath)
+            
+            if project:
+                self._load_project_to_scene(project)
+                self.setWindowTitle(f"ECAD - {project.name} ({Path(filepath).name})")
+                
+                # Add to recent files
+                settings = self.settings_manager
+                settings.add_recent_file(filepath)
+                self._update_recent_menu()
+                
+                self.statusBar().showMessage(f"Loaded: {filepath}", 3000)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to load project")
+
+    def save_project(self):
+        """Save current project"""
+        if self.project_handler.current_path:
+            success = self.project_handler.save_project()
+            if success:
+                self.statusBar().showMessage(f"Saved: {self.project_handler.current_path}", 3000)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project")
+        else:
+            self.save_project_as()
+
+    def save_project_as(self):
+        """Save project with new name"""
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project As",
+            str(Path.home() / "untitled.ecad"),
+            "ECAD Projects (*.ecad);;All Files (*)"
+        )
+        
+        if filepath:
+            # Ensure .ecad extension
+            if not filepath.endswith('.ecad'):
+                filepath += '.ecad'
+            
+            # Gather current project data from scene
+            project = self._create_project_from_scene()
+            self.project_handler.current_project = project
+            
+            success = self.project_handler.save_project(filepath)
+            if success:
+                self.setWindowTitle(f"ECAD - {project.name} ({Path(filepath).name})")
+                
+                # Add to recent files
+                settings = self.settings_manager
+                settings.add_recent_file(filepath)
+                self._update_recent_menu()
+                
+                self.statusBar().showMessage(f"Saved: {filepath}", 3000)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project")
+
+    def _create_project_from_scene(self) -> WiringHarness:
+        """Create project data from current scene"""
+        from model.models import WiringHarness, Connector, Wire, Node, Pin
+        from model.models import Gender, SealType, ConnectorType, WireType, NodeType
+        from model.models import CombinedWireColor
+        
+        harness = self.project_handler.current_project or WiringHarness(name="Project")
+        
+        # Clear existing data
+        harness.connectors.clear()
+        harness.wires.clear()
+        harness.nodes.clear()
+        harness.branches.clear()
+        
+        # Add connectors
+        for conn_item in self.conns:
+            # Create connector
+            connector = Connector(
+                id=conn_item.cid,
+                name=conn_item.cid,
+                type=ConnectorType.OTHER,
+                gender=Gender.FEMALE,
+                seal=SealType.UNSEALED,
+                part_number=getattr(conn_item, 'part_number', None),
+                manufacturer=getattr(conn_item, 'manufacturer', None),
+                position=(conn_item.pos().x(), conn_item.pos().y())
+            )
+            
+            # Add pins
+            for pin_item in conn_item.pins:
+                wire_id = None
+                if pin_item.wires:
+                    # Get the first wire's ID
+                    wire = pin_item.wires[0]
+                    if hasattr(wire, 'wid'):
+                        wire_id = wire.wid
+                    elif hasattr(wire, 'wire') and hasattr(wire.wire, 'id'):
+                        wire_id = wire.wire.id
+                
+                pin = Pin(
+                    number=pin_item.original_id or pin_item.pid,
+                    gender=Gender.FEMALE,
+                    seal=SealType.UNSEALED,
+                    wire_id=wire_id
+                )
+                connector.pins[pin.number] = pin
+            
+            harness.connectors[connector.id] = connector
+            
+            # Create node for connector
+            node = Node(
+                id=f"NODE_{connector.id}",
+                harness_id=harness.id,
+                name=connector.id,
+                type=NodeType.CONNECTOR,
+                connector_id=connector.id,
+                position=connector.position
+            )
+            harness.nodes[node.id] = node
+        
+        # Add wires from imported_wire_items
+        for wire_item in getattr(self, 'imported_wire_items', []):
+            if hasattr(wire_item, 'wire_data'):
+                wd = wire_item.wire_data
+                
+                wire = Wire(
+                    id=wire_item.wid,
+                    harness_id=harness.id,
+                    type=WireType.FLRY_B_0_5,
+                    color=CombinedWireColor(wd.color),
+                    from_node_id=f"NODE_{wd.from_device}",
+                    to_node_id=f"NODE_{wd.to_device}",
+                    from_pin=wd.from_pin,
+                    to_pin=wd.to_pin,
+                    signal_name=wd.signal_name,
+                    part_number=wd.part_number,
+                    cross_section=wd.cross_section
+                )
+                harness.wires[wire.id] = wire
+        
+        return harness
+
+
+    def _load_project_to_scene(self, project: WiringHarness):
+        """Load project data into scene"""
+        # Clear existing
+        self.scene.clear()
+        self.conns = []
+        self.wires = []
+        self.imported_wire_items = []
+        
+        # Create connectors
+        for conn_id, connector in project.connectors.items():
+            # Get pin IDs from connector
+            pin_ids = list(connector.pins.keys())
+            pin_ids.sort()
+            
+            # Create connector item
+            conn_item = ConnectorItem(
+                connector.position[0],
+                connector.position[1],
+                pins=pin_ids
+            )
+            conn_item.cid = conn_id
+            conn_item.part_number = connector.part_number
+            conn_item.manufacturer = connector.manufacturer
+            
+            # Setup topology
+            conn_item.set_topology_manager(self.topology_manager)
+            conn_item.set_main_window(self)
+            conn_item.create_topology_node()
+            
+            self.scene.addItem(conn_item)
+            self.conns.append(conn_item)
+        
+        # Create wires (as direct wires first)
+        from graphics.wire_item import WireItem
+        from model.netlist import Netlist
+        
+        netlist = Netlist()
+        self.topology_manager.set_netlist(netlist)
+        
+        for wire_id, wire in project.wires.items():
+            # Find connectors
+            from_conn = None
+            to_conn = None
+            
+            for conn in self.conns:
+                if conn.cid in wire.from_node_id:
+                    from_conn = conn
+                if conn.cid in wire.to_node_id:
+                    to_conn = conn
+            
+            if not from_conn or not to_conn:
+                continue
+            
+            # Find pins
+            from_pin = from_conn.get_pin_by_id(wire.from_pin) if wire.from_pin else None
+            to_pin = to_conn.get_pin_by_id(wire.to_pin) if wire.to_pin else None
+            
+            if not from_pin or not to_pin:
+                continue
+            
+            # Create net
+            net = netlist.connect(from_pin, to_pin)
+            
+            # Create wire
+            wire_item = WireItem(
+                wire.id,
+                from_pin,
+                to_pin,
+                wire.color.code if hasattr(wire, 'color') else 'SW',
+                net
+            )
+            wire_item.wire_data = wire
+            wire_item.net = net
+            
+            self.scene.addItem(wire_item)
+            self.imported_wire_items.append(wire_item)
+            
+            from_pin.wires.append(wire_item)
+            to_pin.wires.append(wire_item)
+        
+        # Refresh views
+        self.refresh_tree_views()
+        self.refresh_connector_labels()
+
+
+    def _update_recent_menu(self):
+        """Update recent files menu"""
+        self.recent_menu.clear()
+        
+        recent_files = self.settings_manager.get_recent_files()
+        
+        if not recent_files:
+            action = self.recent_menu.addAction("(No recent files)")
+            action.setEnabled(False)
+            return
+        
+        for filepath in recent_files:
+            action = self.recent_menu.addAction(Path(filepath).name)
+            action.setData(filepath)
+            action.triggered.connect(lambda checked, f=filepath: self.open_recent(f))
+
+    def open_recent(self, filepath):
+        """Open a recent file"""
+        if Path(filepath).exists():
+            self.open_project(filepath)
+        else:
+            QMessageBox.warning(self, "File Not Found", f"File not found:\n{filepath}")
+
+    def export_to_excel(self):
+        """Export current project to Excel"""
+        if not self.project_handler.current_project:
+            QMessageBox.warning(self, "No Project", "No project to export")
+            return
+        
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export to Excel",
+            str(Path.home() / f"{self.project_handler.current_project.name}.xlsx"),
+            "Excel Files (*.xlsx);;All Files (*)"
+        )
+        
+        if filepath:
+            success = self.project_handler.export_to_excel(filepath)
+            if success:
+                self.statusBar().showMessage(f"Exported to: {filepath}", 3000)
+            else:
+                QMessageBox.critical(self, "Error", "Export failed")
+
+    def export_hdt(self):
+        """Export Harness Drawing Table"""
+        # This will be implemented later
+        QMessageBox.information(self, "Info", "HDT export coming soon!")
+
+    def closeEvent(self, event):
+        """Handle window close event"""
+        if self.project_handler.modified:
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "Save changes before closing?",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+            
+            if reply == QMessageBox.Yes:
+                self.save_project()
+                event.accept()
+            elif reply == QMessageBox.No:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
+            
+    def _create_undo_redo_actions(self):
+        """Create undo/redo actions and add to toolbars"""
+        
+        # Undo action
+        self.undo_action = QAction("↩ Undo", self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        self.undo_action.setEnabled(False)
+        self.undo_action.triggered.connect(self.undo_manager.undo)
+        
+        # Redo action
+        self.redo_action = QAction("↪ Redo", self)
+        self.redo_action.setShortcut("Ctrl+Y")
+        self.redo_action.setEnabled(False)
+        self.redo_action.triggered.connect(self.undo_manager.redo)
+        
+        # Add to main toolbar
+        if hasattr(self, 'toolbar'):
+            self.toolbar.addSeparator()
+            self.toolbar.addAction(self.undo_action)
+            self.toolbar.addAction(self.redo_action)
+        
+        # Add to edit menu
+        menubar = self.menuBar()
+        edit_menu = None
+        for action in menubar.actions():
+            if action.text() == "&Edit":
+                edit_menu = action.menu()
+                break
+        
+        if not edit_menu:
+            edit_menu = menubar.addMenu("&Edit")
+        
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
+    
+    def _wrap_with_undo(self, command: BaseCommand):
+        """Helper to push commands to undo manager"""
+        self.undo_manager.push(command)
+
+    def on_connector_moved(self, connector):
+        """Handle connector movement with undo"""
+        # This method is called from the dispatcher
+        # We need to store the old position in the connector when movement starts
+        
+        # Check if we have an old position stored
+        if hasattr(connector, '_old_pos'):
+            old_pos = connector._old_pos
+            new_pos = connector.pos()
+            
+            # Only create command if position actually changed
+            if old_pos != new_pos:
+                from commands.connector_commands import MoveConnectorCommand
+                cmd = MoveConnectorCommand(connector, old_pos, new_pos)
+                self.undo_manager.push(cmd)
+                
+                # Clear the stored old position
+                delattr(connector, '_old_pos')
+        
+        # Always update topology
+        if connector.topology_node:
+            connector.topology_node.position = (connector.pos().x(), connector.pos().y())
+
+
+    def add_connector_with_undo(self, connector_item, pos):
+        """Add connector with undo support"""
+        from commands.connector_commands import AddConnectorCommand
+        cmd = AddConnectorCommand(self.scene, connector_item, pos)
+        self.undo_manager.push(cmd)
+
+    def delete_selected_with_undo(self):
+        """Delete selected items with undo support"""
+        selected = self.scene.selectedItems()
+        if not selected:
+            return
+        
+        self.undo_manager.begin_macro("Delete Selected")
+        
+        for item in selected:
+            if hasattr(item, 'cid'):  # Connector
+                from commands.connector_commands import DeleteConnectorCommand
+                cmd = DeleteConnectorCommand(self,self.scene, item)
+                self.undo_manager.push(cmd)
+            elif hasattr(item, 'wid'):  # Wire
+                from commands.wire_commands import DeleteWireCommand
+                cmd = DeleteWireCommand(self.scene, item,self)
+                self.undo_manager.push(cmd)
+        
+        self.undo_manager.end_macro()
+
+    def add_wire_with_undo(self, from_pin, to_pin, color="SW"):
+        """Add wire with undo support"""
+        from graphics.wire_item import WireItem
+        from model.netlist import Netlist
+        from commands.wire_commands import AddWireCommand
+        
+        netlist = Netlist()
+        net = netlist.connect(from_pin, to_pin)
+        wire = WireItem(f"W{len(self.wires)+1}", from_pin, to_pin, color, net)
+        
+        cmd = AddWireCommand(scene = self.scene, wire_item = wire, from_pin = from_pin, to_pin = to_pin,main_window = self)
+        self.undo_manager.push(cmd)
+        
+        return wire
+
+    def on_property_changed(self, property_name, value):
+        """Handle property changes with undo"""
+        selected = self.scene.selectedItems()
+        if not selected:
+            return
+        
+        item = selected[0]
+        
+        # Store old value
+        old_value = getattr(item, property_name, None)
+        if old_value == value:
+            return
+        
+        # Create appropriate command
+        if hasattr(item, 'cid'):  # Connector
+            from commands.connector_commands import UpdateConnectorPropertiesCommand
+            cmd = UpdateConnectorPropertiesCommand(
+                item,
+                {property_name: old_value},
+                {property_name: value}
+            )
+        elif hasattr(item, 'wid'):  # Wire
+            from commands.wire_commands import UpdateWirePropertiesCommand
+            cmd = UpdateWirePropertiesCommand(
+                item,
+                {property_name: old_value},
+                {property_name: value}
+            )
+        else:
+            return
+        
+        self.undo_manager.push(cmd)
+
+    def show_undo_history(self):
+        """Show undo history dock widget"""
+        if not hasattr(self, 'undo_dock'):
+            self.undo_dock = self.undo_manager.create_undo_view()
+            self.addDockWidget(Qt.RightDockWidgetArea, self.undo_dock)
+        self.undo_dock.show()
 
 app = QApplication(sys.argv)
 window = MainWindow()

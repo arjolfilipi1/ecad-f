@@ -79,7 +79,12 @@ class ConnectorDatabase:
     def __init__(self, db_path: str = None, dxf_dir: str = "dxf_library",main = None):
         self.main_window = main
         self.db_path = db_path if db_path else self.main_window.settings_manager.settings.database_path+"connectors.db"
-        # self.db_path = db_path if db_path else SettingsManager.settings.database_path 
+        try:
+            if self.db_path[-3:] != '.db':
+                self.db_path += 'connectors.db'
+                print(self.db_path[-3:])
+        except:
+            pass
         self.dxf_dir = Path(dxf_dir)
         self.dxf_dir.mkdir(exist_ok=True)
         self._init_database()

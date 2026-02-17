@@ -287,7 +287,6 @@ class ExcelHarnessImporter:
             connector.pin_count = list(connector.pins.keys())
             
         self.connectors = connectors
-        #print(f"Extracted {len(connectors)} unique connectors")
         return connectors
     
     def _find_part_number(self, device_name: str) -> str:
@@ -364,7 +363,6 @@ def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_
     importer.clean_dataframe()
     wires = importer.extract_wires()
     connectors = importer.extract_connectors()
-    print(connectors)
     # Store import data for later routing
     main_window.imported_wires_data = wires  # ← Rename to avoid confusion
     main_window.imported_connectors = connectors

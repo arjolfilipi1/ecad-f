@@ -16,61 +16,75 @@ class HarnessAutoRouter:
     def route_from_imported_data(self):
         """
         Add topology to existing wires
-        - Keeps all original WireItem objects (but hides them)
-        - Creates segments and branch points
-        - Adds SegmentedWireItem as additional visualization
         """
         print("\n=== AUTO-ROUTING STARTED ===")
         
-        # 1. Collect all imported wire items
         wire_items = getattr(self.main_window, 'imported_wire_items', [])
         if not wire_items:
             print("No imported wires found")
             return False
         
-        print(f"Found {len(wire_items)} direct wires to route")
+        # Store current topology for undo
+        branch_points = []
+        segments = []
         
-        # 2. HIDE original direct wires (don't delete them, just hide)
+        # HIDE original direct wires
         for wire_item in wire_items:
             wire_item.setVisible(False)
             wire_item.setSelected(False)
         
-        # 3. Clear any existing routed wires
+        # Clear any existing routed wires
         if hasattr(self.main_window, 'routed_wire_items'):
             for item in self.main_window.routed_wire_items:
                 if item.scene():
                     self.main_window.scene.removeItem(item)
             self.main_window.routed_wire_items = []
         
-        # 4. Clear existing topology
+        # Clear existing topology
         self.clear_topology()
         
-        # 5. Analyze wire patterns to find optimal branch points
+        # Analyze wire patterns
         wire_groups = self._group_wires_by_path(wire_items)
         
-        # 6. Create branch points and segments
+        # Create branch points and segments
         self._create_topology_from_groups(wire_groups)
         
-        # 7. ADD segmented wire visualization
+        # Add segmented wire visualization
         self._add_segmented_visualization(wire_items)
         
-        # 8. Update wires list for tree view
+        # Update wires list for tree view
         if hasattr(self.main_window, 'routed_wire_items'):
-            self.main_window.wires = [item.wire for item in self.main_window.routed_wire_items if hasattr(item, 'wire')]
+            self.main_window.wires = [item.wire for item in self.main_window.routed_wire_items 
+                                       if hasattr(item, 'wire')]
         
-        # 9. Refresh tree view
+        # Refresh tree view
         self.main_window.refresh_tree_views()
         
-        # 10. Switch visualization mode to show routed wires
+        # Update visualization
         if hasattr(self.main_window, 'viz_manager'):
             self.main_window.viz_manager.set_mode(VisualizationMode.ALL)
             self.main_window.viz_manager.show_direct_wires = False
             self.main_window.viz_manager.update_visibility()
+        
+        # Force update of connectors to refresh wires
         for c in self.main_window.conns:
-            c.moveBy(1, 1)
-            c.moveBy(-1, -1)
+            c.update()
+        
         print("=== AUTO-ROUTING COMPLETED ===\n")
+        
+        # Create undo command
+        from commands.wire_commands import RouteWiresCommand
+        cmd = RouteWiresCommand(
+            self.main_window,
+            wire_items,
+            self.branch_points,
+            self.segments
+        )
+        self.main_window.undo_manager.push(cmd)
+        
         return True
+
+
 
 
 

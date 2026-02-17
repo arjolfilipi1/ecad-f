@@ -130,49 +130,48 @@ class ConnectorItem(QGraphicsRectItem):
         if change == self.ItemSelectedChange:
             # Selection state is changing
             self.update()
-
+            
 
         if change == self.ItemPositionChange:
             # Store old position for topology updates
-            self.old_position = self.pos()
+            self.old_pos = self.pos()
             
         elif change == self.ItemPositionHasChanged:
+                # Notify main window
             if self.main_window and hasattr(self.main_window, 'update_dispatcher'):
                 self.main_window.update_dispatcher.notify_connector_moved(self)
+            
             # Update topology node position
             if self.topology_node:
                 self.topology_node.position = (self.pos().x(), self.pos().y())
             
-            # Update visual wires connected to pins
+            # Update pins
             for pin in self.pins:
                 pin.invalidate_cache()
                 for wire in list(pin.wires):
                     if hasattr(wire, 'update_path'):
                         wire.update_path()
-                    # Also update topology segments
-                    self._update_connected_segments()
             
-            # Update label position
+            # Update segments
+            self._update_connected_segments()
+            
+            # Update label
             self.update_label_pos()
             
-            # Update connector info display
             if hasattr(self, 'info'):
                 self.info.update_text()
         
         elif change == self.ItemRotationHasChanged:
-            # Update pin positions after rotation
+            # Handle rotation
             self._update_pin_positions_after_rotation()
-            
-            # Update connected wires
             for pin in self.pins:
                 for wire in list(pin.wires):
                     if hasattr(wire, 'update_path'):
                         wire.update_path()
-            
-            # Update topology
             self._update_connected_segments()
         
         return super().itemChange(change, value)
+
     
     def _update_pin_positions_after_rotation(self):
         """Recalculate pin positions in scene coordinates after rotation"""
