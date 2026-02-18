@@ -1,27 +1,28 @@
-from PyQt5.QtWidgets import QToolBar, QAction, QDoubleSpinBox, QLabel, QWidget, QHBoxLayout
-from PyQt5.QtCore import Qt, QPointF, pyqtSignal,QPointF, QLineF
-from PyQt5.QtGui import QCursor
+from PyQt5.QtWidgets import QToolBar, QAction, QDoubleSpinBox, QLabel, QWidget, QHBoxLayout, QLineEdit, QPushButton
+from PyQt5.QtCore import Qt, QPointF, pyqtSignal,QLineF
+from PyQt5.QtGui import QCursor, QPen, QColor, QFont
 from enum import Enum
+import math
 
 class BranchDrawMode(Enum):
     """Drawing modes for branch creation"""
     IDLE = 0
-    PLACING_START = 1
-    PLACING_END = 2
-    ADJUSTING_LENGTH = 3
+    WAITING_FIRST_CLICK = 1      # Waiting for user to click first connector
+    SEGMENT_ACTIVE = 2            # Currently drawing a segment
+    AWAITING_LENGTH = 3           # Segment drawn, waiting for length input
 
 class BranchDrawingTool:
-    """Tool for manually drawing branches before routing"""
+    """Tool for manually drawing branches with length specification"""
     
     def __init__(self, main_window):
         self.main_window = main_window
         self.mode = BranchDrawMode.IDLE
-        self.current_branch = None
-        self.start_node = None
+        self.current_segment = None
+        self.current_start_node = None
+        self.current_end_node = None
         self.temp_line = None
-        self.snap_to_grid = True
-        self.snap_to_connectors = True
-        self.snap_to_branch_points = True
+        self.segments = []  # Store completed segments
+        self.nodes = []     # Store created nodes in order
         
         # Create toolbar
         self.toolbar = self._create_toolbar()
@@ -39,389 +40,444 @@ class BranchDrawingTool:
         
         toolbar.addSeparator()
         
-        # Snap options
-        self.snap_grid_action = QAction("▦ Snap to Grid", self.main_window)
-        self.snap_grid_action.setCheckable(True)
-        self.snap_grid_action.setChecked(True)
-        self.snap_grid_action.triggered.connect(lambda c: setattr(self, 'snap_to_grid', c))
-        toolbar.addAction(self.snap_grid_action)
-        
-        self.snap_conn_action = QAction("🔌 Snap to Connectors", self.main_window)
-        self.snap_conn_action.setCheckable(True)
-        self.snap_conn_action.setChecked(True)
-        self.snap_conn_action.triggered.connect(lambda c: setattr(self, 'snap_to_connectors', c))
-        toolbar.addAction(self.snap_conn_action)
-        
-        self.snap_bp_action = QAction("⬤ Snap to Branch Points", self.main_window)
-        self.snap_bp_action.setCheckable(True)
-        self.snap_bp_action.setChecked(True)
-        self.snap_bp_action.triggered.connect(lambda c: setattr(self, 'snap_to_branch_points', c))
-        toolbar.addAction(self.snap_bp_action)
-        
-        toolbar.addSeparator()
-        
         # Length input widget
         length_widget = QWidget()
         length_layout = QHBoxLayout(length_widget)
         length_layout.setContentsMargins(2, 2, 2, 2)
         
         length_layout.addWidget(QLabel("Length:"))
-        self.length_spin = QDoubleSpinBox()
-        self.length_spin.setRange(1, 10000)
-        self.length_spin.setSuffix(" mm")
-        self.length_spin.setValue(100)
-        self.length_spin.setEnabled(False)
-        self.length_spin.valueChanged.connect(self.on_length_changed)
-        length_layout.addWidget(self.length_spin)
+        self.length_input = QLineEdit()
+        self.length_input.setPlaceholderText("undefined")
+        self.length_input.setEnabled(False)
+        self.length_input.returnPressed.connect(self.apply_length)
+        length_layout.addWidget(self.length_input)
+        
+        self.apply_btn = QPushButton("✓ Apply")
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.clicked.connect(self.apply_length)
+        length_layout.addWidget(self.apply_btn)
         
         toolbar.addWidget(length_widget)
         
-        # Apply length button
-        self.apply_length_action = QAction("✓ Apply Length", self.main_window)
-        self.apply_length_action.setEnabled(False)
-        self.apply_length_action.triggered.connect(self.apply_current_length)
-        toolbar.addAction(self.apply_length_action)
-        
         toolbar.addSeparator()
         
-        # Clear/Finish
-        self.finish_action = QAction("✅ Finish Branch", self.main_window)
-        self.finish_action.setEnabled(False)
-        self.finish_action.triggered.connect(self.finish_current_branch)
-        toolbar.addAction(self.finish_action)
+        # Cancel button
+        self.cancel_btn = QAction("❌ Cancel", self.main_window)
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.triggered.connect(self.cancel_drawing)
+        toolbar.addAction(self.cancel_btn)
         
-        self.cancel_action = QAction("❌ Cancel", self.main_window)
-        self.cancel_action.setEnabled(False)
-        self.cancel_action.triggered.connect(self.cancel_drawing)
-        toolbar.addAction(self.cancel_action)
-        self.main_window.addToolBar(toolbar)
         return toolbar
     
     def toggle_draw_mode(self, checked):
-        """Toggle branch drawing mode"""
+        """Enter or exit branch drawing mode"""
         if checked:
             self.start_drawing()
         else:
             self.exit_drawing_mode()
     
     def start_drawing(self):
-        """Enter branch drawing mode"""
-        self.mode = BranchDrawMode.PLACING_START
-        self.main_window.statusBar().showMessage(
-            "Click on a connector, branch point, or empty space to start branch", 0
-        )
+        """Start the branch drawing workflow"""
+        self.mode = BranchDrawMode.WAITING_FIRST_CLICK
+        self.segments = []
+        self.nodes = []
+        self.current_segment = None
+        self.current_start_node = None
+        self.current_end_node = None
+        
+        self.cancel_btn.setEnabled(True)
         self.main_window.view.viewport().setCursor(QCursor(Qt.CrossCursor))
-
+        self.main_window.statusBar().showMessage(
+            "Click on a connector to start drawing branch", 0
+        )
     
     def exit_drawing_mode(self):
-        """Exit branch drawing mode"""
+        """Exit drawing mode and clean up"""
         self.mode = BranchDrawMode.IDLE
-        self.cancel_drawing()
+        
+        # Remove temp line if it exists
+        if self.temp_line and self.temp_line.scene():
+            self.main_window.scene.removeItem(self.temp_line)
+            self.temp_line = None
+        
+        self.cancel_btn.setEnabled(False)
+        self.length_input.setEnabled(False)
+        self.length_input.clear()
+        self.length_input.setPlaceholderText("undefined")
+        self.apply_btn.setEnabled(False)
+        
         self.draw_action.setChecked(False)
         self.main_window.view.viewport().setCursor(QCursor(Qt.ArrowCursor))
         self.main_window.statusBar().clearMessage()
     
     def cancel_drawing(self):
         """Cancel current drawing operation"""
+        # Remove any incomplete segment
         if self.temp_line and self.temp_line.scene():
             self.main_window.scene.removeItem(self.temp_line)
             self.temp_line = None
         
-        self.current_branch = None
-        self.start_node = None
-        self.mode = BranchDrawMode.IDLE
-        self.finish_action.setEnabled(False)
-        self.cancel_action.setEnabled(False)
-        self.length_spin.setEnabled(False)
-        self.apply_length_action.setEnabled(False)
+        # Clear any created nodes from this session
+        # (Nodes from previous completed segments remain)
         
-        self.main_window.statusBar().showMessage("Drawing cancelled", 2000)
-    
-    def finish_current_branch(self):
-        """Finish current branch and create it"""
-        if not self.current_branch:
-            return
+        self.mode = BranchDrawMode.WAITING_FIRST_CLICK
+        self.current_segment = None
+        self.current_start_node = None
+        self.current_end_node = None
         
-        # Create the actual branch in topology manager
-        from model.models import HarnessBranch
-        
-        branch = HarnessBranch(
-            id=f"BRANCH_{len(self.main_window.topology_manager.branches) + 1}",
-            harness_id=self.main_window.project_handler.current_project.id if self.main_window.project_handler.current_project else "temp",
-            name=f"Branch_{len(self.main_window.topology_manager.branches) + 1}",
-            path_points=self.current_branch['points'],
-            node_ids=self.current_branch['node_ids']
-        )
-        
-        # Add to topology manager
-        self.main_window.topology_manager.branches[branch.id] = branch
-        
-        # Create visual segment
-        from graphics.segment_item import SegmentGraphicsItem
-        from model.topology import WireSegment
-        
-        # Create segment between nodes
-        if len(self.current_branch['node_ids']) >= 2:
-            for i in range(len(self.current_branch['node_ids']) - 1):
-                start_node = self.main_window.topology_manager.nodes.get(self.current_branch['node_ids'][i])
-                end_node = self.main_window.topology_manager.nodes.get(self.current_branch['node_ids'][i + 1])
-                
-                if start_node and end_node:
-                    segment = self.main_window.topology_manager.create_segment(start_node, end_node)
-                    segment_graphics = SegmentGraphicsItem(segment, self.main_window.topology_manager)
-                    self.main_window.scene.addItem(segment_graphics)
-        
-        # Clear temporary items
-        if self.temp_line and self.temp_line.scene():
-            self.main_window.scene.removeItem(self.temp_line)
-            self.temp_line = None
-        
-        self.main_window.statusBar().showMessage(f"Branch created: {branch.name}", 3000)
-        
-        # Reset for next branch
-        self.current_branch = None
-        self.start_node = None
-        self.mode = BranchDrawMode.PLACING_START
-        self.finish_action.setEnabled(False)
-        self.cancel_action.setEnabled(False)
-        self.length_spin.setEnabled(False)
-        self.apply_length_action.setEnabled(False)
-    
-    def on_mouse_press(self, event):
-        """Handle mouse press in branch drawing mode"""
-        if self.mode == BranchDrawMode.IDLE:
-            return
-        
-        pos = self.main_window.view.mapToScene(event.pos())
-        
-        # Snap to grid if enabled
-        if self.snap_to_grid:
-            grid_size = self.main_window.settings_manager.get('grid_size', 50)
-            pos.setX(round(pos.x() / grid_size) * grid_size)
-            pos.setY(round(pos.y() / grid_size) * grid_size)
-        
-        # Check for snapping to connectors or branch points
-        snapped_node = None
-        if self.snap_to_connectors or self.snap_to_branch_points:
-            snapped_node = self._find_snappable_node(pos)
-            if snapped_node:
-                pos = QPointF(*snapped_node.position)
-        
-        if self.mode == BranchDrawMode.PLACING_START:
-            # Start a new branch
-            print("start")
-            self._start_new_branch(pos, snapped_node)
-            
-        elif self.mode == BranchDrawMode.PLACING_END:
-            print(snapped_node)
-            # Add a point to current branch
-            self._add_branch_point(pos, snapped_node)
-    
-    def _find_snappable_node(self, pos: QPointF, tolerance: float = 20.0):
-        """Find a node (connector or branch point) near the given position"""
-        closest_node = None
-        min_dist = tolerance
-        
-        # Check all topology nodes
-        for node in self.main_window.topology_manager.nodes.values():
-            node_pos = QPointF(*node.position)
-            dist = (node_pos - pos).manhattanLength()
-            
-            if dist < min_dist:
-                min_dist = dist
-                closest_node = node
-        
-        return closest_node
-    
-    def _start_new_branch(self, pos: QPointF, start_node):
-        """Start a new branch at the given position"""
-        self.start_node = start_node
-        self.current_branch = {
-            'points': [(pos.x(), pos.y())],
-            'node_ids': [start_node.id] if start_node else []
-        }
-        
-        # Create temporary line for visualization
-        from PyQt5.QtWidgets import QGraphicsLineItem
-        from PyQt5.QtGui import QPen
-        from PyQt5.QtCore import QLineF
-        
-        self.temp_line = QGraphicsLineItem()
-        self.temp_line.setPen(QPen(Qt.blue, 2, Qt.DashLine))
-        self.temp_line.setLine(QLineF(pos, pos))
-        self.main_window.scene.addItem(self.temp_line)
-        
-        self.mode = BranchDrawMode.PLACING_END
-        self.finish_action.setEnabled(True)
-        self.cancel_action.setEnabled(True)
-        self.length_spin.setEnabled(True)
-        self.apply_length_action.setEnabled(True)
+        self.length_input.setEnabled(False)
+        self.length_input.clear()
+        self.length_input.setPlaceholderText("undefined")
+        self.apply_btn.setEnabled(False)
         
         self.main_window.statusBar().showMessage(
-            "Click to add points, double-click to finish, or enter length", 0
+            "Drawing cancelled - click a connector to start new branch", 0
         )
     
-    def _add_branch_point(self, pos: QPointF, snapped_node):
-        """Add a point to the current branch"""
-        if not self.current_branch:
-            print("no current node")
+    def on_mouse_press(self, event):
+        """Handle mouse press based on current mode"""
+        if self.mode == BranchDrawMode.IDLE:
             return
+        print("start")
+        pos = self.main_window.view.mapToScene(event.pos())
         
-        self.current_branch['points'].append((pos.x(), pos.y()))
-        print(self.current_branch)
-        if snapped_node and snapped_node.id not in self.current_branch['node_ids']:
-            self.current_branch['node_ids'].append(snapped_node.id)
+        # Check if we clicked on a connector
+        clicked_item = self.main_window.view.itemAt(event.pos())
+        from graphics.connector_item import ConnectorItem
         
-        # Update temporary line
-        if self.temp_line:
-            last_point = self.current_branch['points'][-2]
-            self.temp_line.setLine(QLineF(
-                QPointF(*last_point),
-                QPointF(*self.current_branch['points'][-1])
-            ))
+        if self.mode == BranchDrawMode.WAITING_FIRST_CLICK:
+            # First click must be on a connector
+            if isinstance(clicked_item, ConnectorItem):
+                self._start_from_connector(clicked_item, pos)
+            else:
+                self.main_window.statusBar().showMessage(
+                    "Please click on a connector to start", 2000
+                )
+        
+        elif self.mode == BranchDrawMode.SEGMENT_ACTIVE:
+            # Click can be on empty space (creates node) or on connector
+            if isinstance(clicked_item, ConnectorItem):
+                self._finish_at_connector(clicked_item, pos)
+            else:
+                self._create_node_at_position(pos)
     
     def on_mouse_move(self, event):
-        """Handle mouse move for preview"""
-        if self.mode != BranchDrawMode.PLACING_END or not self.temp_line or not self.current_branch:
+        """Update temporary line preview"""
+        if self.mode != BranchDrawMode.SEGMENT_ACTIVE or not self.current_start_node:
             return
         
         pos = self.main_window.view.mapToScene(event.pos())
         
-        # Snap preview
-        if self.snap_to_grid:
-            grid_size = self.main_window.settings_manager.get('grid_size', 50)
-            pos.setX(round(pos.x() / grid_size) * grid_size)
-            pos.setY(round(pos.y() / grid_size) * grid_size)
+        # Update temp line
+        if not self.temp_line:
+            from PyQt5.QtWidgets import QGraphicsLineItem
+            from PyQt5.QtCore import QLineF
+            
+            self.temp_line = QGraphicsLineItem()
+            
+            # Create dashed line style
+            pen = QPen(QColor(100, 100, 255), 2)
+            pen.setStyle(Qt.DashDotLine)  # " _ . _ . _ " style
+            self.temp_line.setPen(pen)
+            
+            self.main_window.scene.addItem(self.temp_line)
+        from PyQt5.QtCore import QLineF, QPointF
+        # Update line position
+        start_pos = QPointF(*self.current_start_node.position)
+        self.temp_line.setLine(QLineF(start_pos, pos))
         
-        # Update temp line to show potential next segment
-        last_point = self.current_branch['points'][-1]
-        self.temp_line.setLine(QLineF(
-            QPointF(*last_point),
-            pos
-        ))
+        # Calculate and display temporary length
+        dx = pos.x() - start_pos.x()
+        dy = pos.y() - start_pos.y()
+        temp_length = math.sqrt(dx*dx + dy*dy)
         
-        # Update length display
-        length = self._calculate_branch_length(self.current_branch['points'] + [(pos.x(), pos.y())])
-        self.length_spin.blockSignals(True)
-        self.length_spin.setValue(length)
-        self.length_spin.blockSignals(False)
+        self.main_window.statusBar().showMessage(
+            f"Current length: {temp_length:.1f} mm - Click to place node or connector", 0
+        )
     
-    def on_mouse_double_click(self, event):
-        """Finish branch on double click"""
-        if self.mode == BranchDrawMode.PLACING_END and self.current_branch:
-            print("finishing")
-            self.finish_current_branch()
-    
-    def _calculate_branch_length(self, points):
-        """Calculate total length of a branch from points"""
-        if len(points) < 2:
-            return 0
+    def _start_from_connector(self, connector_item, pos):
+        """Start a new branch from a connector"""
+        # Get the connector's topology node
+        start_node = connector_item.topology_node
         
-        import math
-        total = 0
-        for i in range(len(points) - 1):
-            dx = points[i+1][0] - points[i][0]
-            dy = points[i+1][1] - points[i][1]
-            total += math.sqrt(dx*dx + dy*dy)
-        return total
+        if not start_node:
+            print("Connector has no topology node")
+            return
+        
+        self.current_start_node = start_node
+        self.nodes = [start_node]  # Start with this node
+        
+        self.mode = BranchDrawMode.SEGMENT_ACTIVE
+        
+        self.main_window.statusBar().showMessage(
+            "Click on empty space to create a node, or on another connector to finish", 0
+        )
     
-    def on_length_changed(self, value):
-        """Handle length spinbox changes"""
-        if not self.current_branch or len(self.current_branch['points']) < 2:
+    def _create_node_at_position(self, pos):
+        """Create a new branch point node at the clicked position"""
+        from model.topology import BranchPointNode
+        from graphics.topology_item import BranchPointGraphicsItem
+        
+        # Create the node
+        node = BranchPointNode((pos.x(), pos.y()), "split")
+        self.main_window.topology_manager.nodes[node.id] = node
+        
+        # Create graphics
+        node_graphics = BranchPointGraphicsItem(node)
+        self.main_window.scene.addItem(node_graphics)
+        
+        # This will be the end of current segment
+        self.current_end_node = node
+        
+        # Create temporary segment (will be finalized after length input)
+        self._create_temporary_segment()
+    
+    def _finish_at_connector(self, connector_item, pos):
+        """Finish the branch at a connector"""
+        end_node = connector_item.topology_node
+        
+        if not end_node:
+            print("Connector has no topology node")
+            return
+        
+        self.current_end_node = end_node
+        self.nodes.append(end_node)
+        
+        # Create temporary segment
+        self._create_temporary_segment()
+        
+        # Branch is complete!
+        self._finalize_branch()
+    
+    def _create_temporary_segment(self):
+        """Create a temporary segment that needs length specification"""
+        if not self.current_start_node or not self.current_end_node:
             return
         
         # Calculate current length
-        current_length = self._calculate_branch_length(self.current_branch['points'])
+        p1 = self.current_start_node.position
+        p2 = self.current_end_node.position
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        current_length = math.sqrt(dx*dx + dy*dy)
         
-        # Update preview line to show target length
-        if self.temp_line and current_length > 0:
-            # Scale factor
-            scale = value / current_length
-            # This would need more sophisticated geometry handling
-            # For now, just update the status
-            self.main_window.statusBar().showMessage(
-                f"Current: {current_length:.1f} mm, Target: {value:.1f} mm", 0
-            )
+        # Store segment info
+        self.current_segment = {
+            'start': self.current_start_node,
+            'end': self.current_end_node,
+            'length': current_length,
+            'graphics': None
+        }
+        
+        # Create visual segment with dashed line
+        from PyQt5.QtWidgets import QGraphicsLineItem
+        from PyQt5.QtCore import QLineF
+        
+        line_item = QGraphicsLineItem()
+        pen = QPen(QColor(100, 100, 255), 2)
+        pen.setStyle(Qt.DashDotLine)  # " _ . _ . _ " style
+        line_item.setPen(pen)
+        line_item.setLine(QLineF(
+            QPointF(*p1),
+            QPointF(*p2)
+        ))
+        self.main_window.scene.addItem(line_item)
+        
+        # Add length label
+        from PyQt5.QtWidgets import QGraphicsTextItem
+        
+        mid_x = (p1[0] + p2[0]) / 2
+        mid_y = (p1[1] + p2[1]) / 2
+        
+        label = QGraphicsTextItem(f"{current_length:.1f} mm", line_item)
+        label.setPos(mid_x - 20, mid_y - 15)
+        label.setDefaultTextColor(QColor(100, 100, 255))
+        label.setFont(QFont("Arial", 8))
+        label.setFlag(label.ItemIgnoresTransformations)
+        
+        self.current_segment['graphics'] = line_item
+        
+        # Switch to awaiting length mode
+        self.mode = BranchDrawMode.AWAITING_LENGTH
+        
+        # Enable length input
+        self.length_input.setEnabled(True)
+        self.length_input.setText(f"{current_length:.1f}")
+        self.length_input.selectAll()
+        self.length_input.setFocus()
+        self.apply_btn.setEnabled(True)
+        
+        self.main_window.statusBar().showMessage(
+            f"Enter desired length and press Enter, or keep {current_length:.1f} mm", 0
+        )
     
-    def apply_current_length(self):
-        """Apply the specified length to the current branch"""
-        if not self.current_branch or len(self.current_branch['points']) < 2:
+    def apply_length(self):
+        """Apply the entered length to the current segment"""
+        if self.mode != BranchDrawMode.AWAITING_LENGTH or not self.current_segment:
             return
         
-        target_length = self.length_spin.value()
-        current_length = self._calculate_branch_length(self.current_branch['points'])
-        
-        if abs(current_length - target_length) < 0.1:
-            # Already at target length
-            self.finish_current_branch()
+        # Get entered length
+        try:
+            new_length = float(self.length_input.text())
+        except ValueError:
+            self.main_window.statusBar().showMessage("Invalid length", 2000)
             return
         
-        # For a simple straight line, we can adjust the last point
-        if len(self.current_branch['points']) == 2:
-            start = self.current_branch['points'][0]
-            end = self.current_branch['points'][1]
-            
-            # Direction vector
-            dx = end[0] - start[0]
-            dy = end[1] - start[1]
-            
-            if abs(dx) < 0.01 and abs(dy) < 0.01:
-                return
-            
-            # Normalize and scale to target length
-            import math
-            current = math.sqrt(dx*dx + dy*dy)
-            if current < 0.01:
-                return
-            
-            scale = target_length / current
-            new_end = (start[0] + dx * scale, start[1] + dy * scale)
-            self.current_branch['points'][1] = new_end
-            
-            # Update temp line
-            if self.temp_line:
-                self.temp_line.setLine(QLineF(
-                    QPointF(*start),
-                    QPointF(*new_end)
-                ))
-            
-            self.main_window.statusBar().showMessage(
-                f"Branch length set to {target_length:.1f} mm", 2000
-            )
-        else:
-            # For multi-point branches, more complex geometry needed
-            self.main_window.statusBar().showMessage(
-                "Length adjustment for multi-point branches not yet implemented", 3000
-            )
+        # Update segment length if different
+        if abs(new_length - self.current_segment['length']) > 0.1:
+            self._adjust_segment_length(new_length)
+        
+        # Finalize this segment
+        self._finalize_segment()
     
-    def add_to_main_toolbar(self):
-        """Add branch drawing button to main toolbar"""
-        # Find main toolbar or create if needed
-        main_toolbar = None
-        for toolbar in self.main_window.findChildren(QToolBar):
-            if toolbar.objectName() == "MainToolBar":
-                main_toolbar = toolbar
+    def _adjust_segment_length(self, new_length):
+        """Adjust the segment to the specified length"""
+        start = self.current_segment['start']
+        end = self.current_segment['end']
+        
+        p1 = QPointF(*start.position)
+        p2 = QPointF(*end.position)
+        
+        # Calculate direction vector
+        dx = p2.x() - p1.x()
+        dy = p2.y() - p1.y()
+        current = math.sqrt(dx*dx + dy*dy)
+        
+        if current < 0.01:
+            return
+        
+        # Scale to new length
+        scale = new_length / current
+        new_p2 = QPointF(
+            p1.x() + dx * scale,
+            p1.y() + dy * scale
+        )
+        
+        # Update end node position
+        end.position = (new_p2.x(), new_p2.y())
+        
+        # Update graphics position if node has graphics
+        for item in self.main_window.scene.items():
+            if hasattr(item, 'branch_node') and item.branch_node.id == end.id:
+                item.setPos(new_p2)
                 break
         
-        if not main_toolbar:
-            main_toolbar = QToolBar("Main Tools")
-            main_toolbar.setObjectName("MainToolBar")
-            self.main_window.addToolBar(main_toolbar)
+        # Update segment graphics
+        if self.current_segment['graphics']:
+            self.current_segment['graphics'].setLine(QLineF(p1, new_p2))
+            
+            # Update label
+            mid_x = (p1.x() + new_p2.x()) / 2
+            mid_y = (p1.y() + new_p2.y()) / 2
+            
+            # Find and update label
+            for child in self.current_segment['graphics'].childItems():
+                if isinstance(child, QGraphicsTextItem):
+                    child.setPlainText(f"{new_length:.1f} mm")
+                    child.setPos(mid_x - 20, mid_y - 15)
+                    break
         
-        # Add separator and button
-        main_toolbar.addSeparator()
-        main_toolbar.addAction(self.draw_action)
-    def create_branch_point_at_position(self, pos: QPointF):
-        """Create a branch point at the given position"""
-        from graphics.topology_item import BranchPointGraphicsItem
-        from model.topology import BranchPointNode
+        self.current_segment['length'] = new_length
+    
+    def _finalize_segment(self):
+        """Finalize the current segment and prepare for next"""
+        if not self.current_segment:
+            return
         
-        # Create branch point node
-        bp_node = self.main_window.topology_manager.create_branch_point((pos.x(), pos.y()), "split")
+        # Create permanent segment in topology manager
+        from model.topology import WireSegment
+        from graphics.segment_item import SegmentGraphicsItem
         
-        # Create graphics
-        bp_graphics = BranchPointGraphicsItem(bp_node)
-        self.main_window.scene.addItem(bp_graphics)
+        segment = WireSegment(
+            start_node=self.current_segment['start'],
+            end_node=self.current_segment['end']
+        )
+        self.main_window.topology_manager.segments[segment.id] = segment
         
-        return bp_node
-
+        # Replace temporary line with permanent segment
+        if self.current_segment['graphics']:
+            self.main_window.scene.removeItem(self.current_segment['graphics'])
+        
+        # Create permanent segment graphics
+        segment_graphics = SegmentGraphicsItem(segment, self.main_window.topology_manager)
+        self.main_window.scene.addItem(segment_graphics)
+        
+        # Add to nodes list
+        self.nodes.append(self.current_segment['end'])
+        
+        # Prepare for next segment
+        self.current_start_node = self.current_segment['end']
+        self.current_segment = None
+        
+        # Clear temp line
+        if self.temp_line and self.temp_line.scene():
+            self.main_window.scene.removeItem(self.temp_line)
+            self.temp_line = None
+        
+        # Disable length input for next segment
+        self.length_input.setEnabled(False)
+        self.length_input.clear()
+        self.length_input.setPlaceholderText("undefined")
+        self.apply_btn.setEnabled(False)
+        
+        # Go back to segment active mode
+        self.mode = BranchDrawMode.SEGMENT_ACTIVE
+        
+        self.main_window.statusBar().showMessage(
+            "Continue drawing: click on empty space for new node, or on connector to finish", 0
+        )
+    
+    def _finalize_branch(self):
+        """Create the final HarnessBranch from all segments"""
+        if len(self.nodes) < 2:
+            return
+        
+        from model.models import HarnessBranch
+        import uuid
+        
+        # Collect path points from all segments
+        path_points = []
+        node_ids = []
+        
+        for node in self.nodes:
+            node_ids.append(node.id)
+            
+            # Get node position
+            if hasattr(node, 'position'):
+                path_points.append(node.position)
+        
+        # Create branch
+        branch = HarnessBranch(
+            id=f"BRANCH_{uuid.uuid4().hex[:8]}",
+            harness_id=self.main_window.project_handler.current_project.id if self.main_window.project_handler.current_project else "temp",
+            name=f"Branch_{len(self.main_window.topology_manager.branches) + 1}",
+            path_points=path_points,
+            node_ids=node_ids,
+            wire_ids=[]
+        )
+        
+        # Store in topology manager
+        self.main_window.topology_manager.branches[branch.id] = branch
+        
+        # Update branch list if exists
+        if hasattr(self.main_window, 'branch_dock'):
+            self.main_window.branch_dock.update_list()
+        
+        self.main_window.statusBar().showMessage(
+            f"Branch completed with {len(self.nodes)} nodes", 3000
+        )
+        
+        # Exit drawing mode or start new branch?
+        reply = QMessageBox.question(
+            self.main_window,
+            "Branch Complete",
+            "Branch finished. Draw another branch?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Start new branch
+            self.start_drawing()
+        else:
+            # Exit drawing mode
+            self.exit_drawing_mode()

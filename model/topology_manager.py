@@ -171,3 +171,9 @@ class TopologyManager:
             
             return [seg1, seg2]
         return [segment]
+    def create_fastener_node(self, position, fastener_type="cable_tie", part_number=None):
+        """Create a new fastener node"""
+        from model.topology import FastenerNode
+        fastener = FastenerNode(position, fastener_type, part_number)
+        self.nodes[fastener.id] = fastener
+        return fastener

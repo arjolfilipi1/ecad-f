@@ -517,7 +517,59 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'auto_router'):
             self.auto_router.clear_topology()
             self.statusBar().showMessage("Topology cleared", 3000)
+    def add_branch_point(self):
+        """Add a branch point at mouse position"""
+        pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
+        
+        # Create data model
+        bp_node = self.topology_manager.create_branch_point((pos.x(), pos.y()))
+        
+        # Create graphics and add to scene
+        from graphics.topology_item import BranchPointGraphicsItem
+        bp_graphics = BranchPointGraphicsItem(bp_node)
+        self.scene.addItem(bp_graphics)
+        
+        # Optional: Add to selection
+        bp_graphics.setSelected(True)
+        
+        self.statusBar().showMessage(f"Branch point added at ({pos.x():.0f}, {pos.y():.0f})", 2000)
+    def add_junction(self):
+        """Add a junction at mouse position"""
+        pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
+        
+        junction_node = self.topology_manager.create_junction((pos.x(), pos.y()))
+        
+        from graphics.topology_item import JunctionGraphicsItem
+        junction_graphics = JunctionGraphicsItem(junction_node)
+        self.scene.addItem(junction_graphics)
+        
+        self.statusBar().showMessage(f"Junction added at ({pos.x():.0f}, {pos.y():.0f})", 2000)
 
+    def add_fastener_node(self):
+        """Add a fastener node at cursor position"""
+        pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
+        
+        # Ask for fastener type
+        from PyQt5.QtWidgets import QInputDialog
+        types = ["cable_tie", "clip", "clamp", "adhesive_clip", "other"]
+        fastener_type, ok = QInputDialog.getItem(
+            self, "Fastener Type", "Select fastener type:", types, 0, False
+        )
+        
+        if ok:
+            part_number, ok2 = QInputDialog.getText(
+                self, "Part Number", "Enter part number (optional):"
+            )
+            
+            fastener_node = self.topology_manager.create_fastener_node(
+                (pos.x(), pos.y()),
+                fastener_type=fastener_type,
+                part_number=part_number if part_number else None
+            )
+            
+            from graphics.topology_item import FastenerGraphicsItem
+            fastener_graphics = FastenerGraphicsItem(fastener_node)
+            self.scene.addItem(fastener_graphics)
     def add_branch_point_manual(self):
         """Add branch point at cursor position"""
         if not hasattr(self, 'manual_router'):
@@ -539,6 +591,31 @@ class MainWindow(QMainWindow):
             btb = self.branch_drawing_tool._create_toolbar()
             self.addToolBar(btb)
         return toolbar
+    def add_fastener_node(self):
+        """Add a fastener node at cursor position"""
+        pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
+        
+        # Ask for fastener type
+        from PyQt5.QtWidgets import QInputDialog
+        types = ["cable_tie", "clip", "clamp", "adhesive_clip", "other"]
+        fastener_type, ok = QInputDialog.getItem(
+            self, "Fastener Type", "Select fastener type:", types, 0, False
+        )
+        
+        if ok:
+            part_number, ok2 = QInputDialog.getText(
+                self, "Part Number", "Enter part number (optional):"
+            )
+            
+            fastener_node = self.topology_manager.create_fastener_node(
+                (pos.x(), pos.y()),
+                fastener_type=fastener_type,
+                part_number=part_number if part_number else None
+            )
+            
+            from graphics.topology_item import FastenerGraphicsItem
+            fastener_graphics = FastenerGraphicsItem(fastener_node)
+            self.scene.addItem(fastener_graphics)
     def _create_topology_toolbar(self):
         """Topology and routing tools (row 1, after main tools)"""
         toolbar = QToolBar("Topology Tools")
@@ -550,6 +627,11 @@ class MainWindow(QMainWindow):
             toolbar.addAction(self.branch_drawing_tool.draw_action)
         
         toolbar.addSeparator()
+        
+        # Add fastener node
+        add_fastener_action = QAction("📌 Add Fastener", self)
+        add_fastener_action.triggered.connect(self.add_fastener_node)
+        toolbar.addAction(add_fastener_action)
         
         # Add branch point tool
         add_branch = QAction("⬤ Branch Point", self)
@@ -1455,14 +1537,132 @@ class MainWindow(QMainWindow):
                 elif event.type() == event.MouseMove:
                     tool.on_mouse_move(event)
                     return True
-                elif event.type() == event.MouseButtonDblClick:
-                    tool.on_mouse_double_click(event)
-                    return True
         
         return super().eventFilter(obj, event)
+    def create_branch_from_selection(self):
+        """Create a new branch from selected nodes"""
+        selected = self.scene.selectedItems()
+        if len(selected) < 2:
+            QMessageBox.warning(self, "Selection Error", 
+                               "Select at least 2 nodes (connectors, branch points, fasteners)")
+            return
+        
+        # Filter to only node types
+        nodes = []
+        for item in selected:
+            if (isinstance(item, ConnectorItem) or 
+                isinstance(item, BranchPointGraphicsItem) or
+                isinstance(item, FastenerGraphicsItem) or
+                isinstance(item, JunctionGraphicsItem)):
+                nodes.append(item)
+        
+        if len(nodes) < 2:
+            QMessageBox.warning(self, "Selection Error", 
+                               "Select at least 2 valid nodes")
+            return
+        
+        # Open branch creation dialog
+        from dialogs.create_branch_dialog import CreateBranchDialog
+        dialog = CreateBranchDialog(self, nodes, self)
+        
+        if dialog.exec_():
+            data = dialog.get_branch_data()
+            self._create_branch_from_nodes(data['name'], data['protection'], data['nodes'])
 
+    def _create_branch_from_nodes(self, name, protection, nodes):
+        """Create a branch from the given nodes"""
+        from model.models import HarnessBranch
+        import math
+        
+        # Collect path points and node IDs
+        path_points = []
+        node_ids = []
+        
+        for i, node_item in enumerate(nodes):
+            # Get node position
+            if hasattr(node_item, 'pos'):
+                pos = node_item.pos()
+                path_points.append((pos.x(), pos.y()))
+            
+            # Get node ID
+            if hasattr(node_item, 'cid'):  # Connector
+                node_ids.append(node_item.cid)
+            elif hasattr(node_item, 'branch_node'):
+                node_ids.append(node_item.branch_node.id)
+            elif hasattr(node_item, 'fastener_node'):
+                node_ids.append(node_item.fastener_node.id)
+            elif hasattr(node_item, 'junction_node'):
+                node_ids.append(node_item.junction_node.id)
+        
+        # Create intermediate points for smooth curves
+        if len(path_points) > 2:
+            # Add Bezier control points for smooth curves
+            smoothed_points = []
+            for i in range(len(path_points) - 1):
+                p1 = path_points[i]
+                p2 = path_points[i + 1]
+                
+                smoothed_points.append(p1)
+                
+                # Add midpoint with slight offset for curve
+                if i < len(path_points) - 2:
+                    mid_x = (p1[0] + p2[0]) / 2
+                    mid_y = (p1[1] + p2[1]) / 2
+                    smoothed_points.append((mid_x, mid_y))
+            
+            smoothed_points.append(path_points[-1])
+            path_points = smoothed_points
+        
+        # Create the branch
+        branch = HarnessBranch(
+            id=f"BRANCH_{uuid.uuid4().hex[:8]}",
+            harness_id=self.project_handler.current_project.id if self.project_handler.current_project else "temp",
+            name=name,
+            protection_id=protection if protection != "None" else None,
+            path_points=path_points,
+            node_ids=node_ids,
+            wire_ids=[]
+        )
+        
+        # Store in topology manager
+        self.topology_manager.branches[branch.id] = branch
+        
+        # Create visual segments between consecutive nodes
+        from graphics.segment_item import SegmentGraphicsItem
+        
+        for i in range(len(nodes) - 1):
+            start_item = nodes[i]
+            end_item = nodes[i + 1]
+            
+            # Get topology nodes
+            start_node = self._get_topology_node(start_item)
+            end_node = self._get_topology_node(end_item)
+            
+            if start_node and end_node:
+                # Create segment
+                segment = self.topology_manager.create_segment(start_node, end_node)
+                segment_graphics = SegmentGraphicsItem(segment, self.topology_manager)
+                self.scene.addItem(segment_graphics)
+        
+        # Update branch list
+        if hasattr(self, 'branch_dock'):
+            self.branch_dock.update_list()
+        
+        self.statusBar().showMessage(f"Branch created: {name}", 3000)
+
+    def _get_topology_node(self, item):
+        """Get topology node from graphics item"""
+        if hasattr(item, 'topology_node'):
+            return item.topology_node
+        elif hasattr(item, 'branch_node'):
+            return item.branch_node
+        elif hasattr(item, 'fastener_node'):
+            return item.fastener_node
+        elif hasattr(item, 'junction_node'):
+            return item.junction_node
+        return None
 app = QApplication(sys.argv)
 window = MainWindow()
-window.resize(800, 600)
+window.resize(1000, 800)
 window.show()
 sys.exit(app.exec_())

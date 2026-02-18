@@ -52,3 +52,11 @@ class Bundle:
         self.diameter: float = 0.0
         self.color: str = "BLK"  # Default bundle color
         self.protection: str = None  # "sleeving", "conduit", etc.
+class FastenerNode(TopologyNode):
+    """Represents a fastener point (cable tie, clip, etc.) along a branch"""
+    def __init__(self, position=(0, 0), fastener_type="cable_tie", part_number=None):
+        super().__init__(f"FST_{uuid.uuid4().hex[:8]}", position)
+        self.type = "fastener"
+        self.fastener_type = fastener_type  # "cable_tie", "clip", "clamp", etc.
+        self.part_number = part_number
+        self.orientation = 0  # Rotation in degrees
