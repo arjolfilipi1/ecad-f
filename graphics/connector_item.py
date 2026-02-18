@@ -131,8 +131,11 @@ class ConnectorItem(QGraphicsRectItem):
             # Selection state is changing
             self.update()
             
-
-        if change == self.ItemPositionChange:
+        if change == QGraphicsItem.GraphicsItemChange.ItemSceneHasChanged:
+            if self.scene() is None:
+                self.cleanup()
+            
+        elif change == self.ItemPositionChange:
             # Store old position for topology updates
             self.old_pos = self.pos()
             
@@ -266,7 +269,26 @@ class ConnectorItem(QGraphicsRectItem):
         self._is_hovered = False
         self.update()
         super().hoverLeaveEvent(event)
-
+    def cleanup(self):
+        """Remove tree item references before deletion"""
+        if self.tree_item:
+            # Remove from tree widget
+            tree = self.tree_item.treeWidget()
+            if tree:
+                index = tree.indexOfTopLevelItem(self.tree_item)
+                if index >= 0:
+                    tree.takeTopLevelItem(index)
+            self.tree_item = None
+        
+        # Clear pin references
+        for pin in self.pins:
+            pin.cleanup()
+        
+        # Clear wire references
+        for wire in list(self.wires):
+            if wire in self.wires:
+                self.wires.remove(wire)
+   
 
 class ConnectorInfoItem(QGraphicsTextItem):
     def __init__(self, connector):

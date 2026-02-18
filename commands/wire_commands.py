@@ -1,5 +1,6 @@
 from .base_command import BaseCommand, CompoundCommand
-
+from PyQt5.QtWidgets import QTreeWidgetItem
+from PyQt5.QtCore import Qt
 class AddWireCommand(BaseCommand):
     """Add a new wire between two pins"""
     
@@ -24,10 +25,10 @@ class AddWireCommand(BaseCommand):
         self.to_pin.wires.append(self.wire)
         
         # Add to main window lists
-        if hasattr(self.scene.parent(), 'wires'):
-            self.scene.parent().wires.append(self.wire)
-        if hasattr(self.scene.parent(), 'imported_wire_items'):
-            self.scene.parent().imported_wire_items.append(self.wire)
+        if hasattr(self.main_window, 'wires'):
+            self.main_window.wires.append(self.wire)
+        if hasattr(self.main_window, 'imported_wire_items'):
+            self.main_window.imported_wire_items.append(self.wire)
         
         self.main_window.refresh_tree_views()
     
@@ -39,10 +40,10 @@ class AddWireCommand(BaseCommand):
             self.to_pin.wires.remove(self.wire)
         
         # Remove from main window lists
-        if hasattr(self.scene.parent(), 'wires') and self.wire in self.scene.parent().wires:
-            self.scene.parent().wires.remove(self.wire)
-        if hasattr(self.scene.parent(), 'imported_wire_items') and self.wire in self.scene.parent().imported_wire_items:
-            self.scene.parent().imported_wire_items.remove(self.wire)
+        if hasattr(self.main_window, 'wires') and self.wire in self.main_window.wires:
+            self.main_window.wires.remove(self.wire)
+        if hasattr(self.main_window, 'imported_wire_items') and self.wire in self.scene.parent().imported_wire_items:
+            self.main_window.imported_wire_items.remove(self.wire)
         
         self.main_window.refresh_tree_views()
 
@@ -61,21 +62,32 @@ class DeleteWireCommand(BaseCommand):
         self.color = wire_item.color_data.code if hasattr(wire_item, 'color_data') else 'SW'
         self.net = wire_item.net
         self.wire_data = getattr(wire_item, 'wire_data', None)
+        self.tree_item_text = None
+        if wire_item.tree_item:
+            self.tree_item_text = wire_item.tree_item.text(0)
+
     
     def redo(self):
+        # Call cleanup
+        self.wire.cleanup()
+
+        # Remove from scene
         self.scene.removeItem(self.wire)
+        
+        # Remove from pins
         if self.wire in self.from_pin.wires:
             self.from_pin.wires.remove(self.wire)
         if self.wire in self.to_pin.wires:
             self.to_pin.wires.remove(self.wire)
         
         # Remove from main window lists
-        if hasattr(self.scene.parent(), 'wires') and self.wire in self.scene.parent().wires:
-            self.scene.parent().wires.remove(self.wire)
-        if hasattr(self.scene.parent(), 'imported_wire_items') and self.wire in self.scene.parent().imported_wire_items:
-            self.scene.parent().imported_wire_items.remove(self.wire)
+        if hasattr(self.main_window, 'wires') and self.wire in self.main_window.wires:
+            self.main_window.wires.remove(self.wire)
+        if hasattr(self.main_window, 'imported_wire_items') and self.wire in self.main_window.imported_wire_items:
+            self.main_window.imported_wire_items.remove(self.wire)
         
         self.main_window.refresh_tree_views()
+
     
     def undo(self):
         from graphics.wire_item import WireItem
@@ -93,13 +105,22 @@ class DeleteWireCommand(BaseCommand):
         self.from_pin.wires.append(new_wire)
         self.to_pin.wires.append(new_wire)
         
+        # Create NEW tree item (don't try to reuse old one)
+        item = QTreeWidgetItem([self.tree_item_text or new_wire.wid])
+        item.setData(0, Qt.UserRole, new_wire)
+        self.main_window.wires_tree.addTopLevelItem(item)
+        new_wire.tree_item = item
+        
         self.wire = new_wire
         
         # Add to main window lists
-        self.scene.parent().wires.append(new_wire)
-        self.scene.parent().imported_wire_items.append(new_wire)
+        self.main_window.wires.append(new_wire)
+        self.main_window.imported_wire_items.append(new_wire)
         
+        # Refresh tree to ensure consistency
         self.main_window.refresh_tree_views()
+
+
 
 
 class UpdateWirePropertiesCommand(BaseCommand):

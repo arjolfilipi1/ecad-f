@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QGraphicsPathItem, QStyle
 from PyQt5.QtGui import QPainterPath, QPen, QColor
 from PyQt5.QtCore import Qt, QPointF
 from model.models import CombinedWireColor
+from PyQt5 import sip
 class WireItem(QGraphicsPathItem):
     def __init__(self, wid, start_pin, end_pin, color_txt="SW", net=None):
         super().__init__()
@@ -119,6 +120,38 @@ class WireItem(QGraphicsPathItem):
         self._is_hovered = False
         self.update()
         super().hoverLeaveEvent(event)
+    def cleanup(self):
+        """Clean up wire references before deletion"""
+        # CRITICAL: Remove tree item reference FIRST
+        if self.tree_item:
+            # Disconnect any signals
+            try:
+                tree = self.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    # Remove from tree safely
+                    index = tree.indexOfTopLevelItem(self.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except RuntimeError:
+                # Tree widget already deleted, ignore
+                pass
+            
+            # Set to None to break reference
+            self.tree_item = None
+        
+        # Remove from pins
+        if self.start_pin and self in self.start_pin.wires:
+            self.start_pin.wires.remove(self)
+        if self.end_pin and self in self.end_pin.wires:
+            self.end_pin.wires.remove(self)
+
+    def __del__(self):
+        """Ensure cleanup on deletion"""
+        try:
+            self.cleanup()
+        except:
+            pass
+
 
 
                     
@@ -274,4 +307,21 @@ class SegmentedWireItem(QGraphicsPathItem):
             pen.setColor(Qt.cyan)
         painter.setPen(pen)
         painter.drawPath(self.path())
-
+    def cleanup(self):
+        """Clean up segmented wire references"""
+        if self.tree_item:
+            try:
+                tree = self.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    index = tree.indexOfTopLevelItem(self.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except RuntimeError:
+                pass
+            self.tree_item = None
+    
+    def __del__(self):
+        try:
+            self.cleanup()
+        except:
+            pass

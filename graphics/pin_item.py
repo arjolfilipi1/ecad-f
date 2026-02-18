@@ -106,3 +106,7 @@ class PinItem(QGraphicsEllipseItem):
     def get_local_offset(self):
         """Get the offset relative to connector center"""
         return self.offset
+    def cleanup(self):
+        """Clean up pin references"""
+        self.wires.clear()
+        self.topology_connection = None

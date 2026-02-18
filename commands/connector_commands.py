@@ -1,14 +1,16 @@
-from PyQt5.QtCore import QPointF
+from PyQt5.QtCore import QPointF,Qt
+from PyQt5.QtWidgets import QTreeWidgetItem
 from .base_command import BaseCommand, CompoundCommand
 
 class AddConnectorCommand(BaseCommand):
     """Add a new connector to the scene"""
     
-    def __init__(self, scene, connector_item, pos: QPointF, description="Add Connector"):
+    def __init__(self, scene, connector_item, pos: QPointF, description="Add Connector",main_window= None):
         super().__init__(description)
         self.scene = scene
         self.connector = connector_item
         self.pos = pos
+        self.main_window = main_window
         self.connector_id = connector_item.cid
         self.pin_count = len(connector_item.pins)
     
@@ -21,21 +23,21 @@ class AddConnectorCommand(BaseCommand):
         self.scene.addItem(self.connector)
         
         # Add to main window lists
-        if hasattr(self.scene.parent(), 'conns'):
-            self.scene.parent().conns.append(self.connector)
+        if hasattr(self.main_window, 'conns'):
+            self.main_window.conns.append(self.connector)
         
         # Update tree
-        self.scene.parent().refresh_tree_views()
+        self.main_window.refresh_tree_views()
     
     def undo(self):
         self.scene.removeItem(self.connector)
         
         # Remove from main window lists
-        if hasattr(self.scene.parent(), 'conns') and self.connector in self.scene.parent().conns:
-            self.scene.parent().conns.remove(self.connector)
+        if hasattr(self.main_window, 'conns') and self.connector in self.main_window.conns:
+            self.main_window.conns.remove(self.connector)
         
         # Update tree
-        self.scene.parent().refresh_tree_views()
+        self.main_window.refresh_tree_views()
     
     def to_dict(self) -> dict:
         data = super().to_dict()
@@ -59,15 +61,22 @@ class DeleteConnectorCommand(CompoundCommand):
         self.connector_id = connector_item.cid
         self.original_pos = connector_item.pos()
         self.wire_commands = []
-        
-        # Find all connected wires and create delete commands for them
-        for pin in connector_item.pins:
-            for wire in list(pin.wires):  # Copy list to avoid modification during iteration
-                from commands.wire_commands import DeleteWireCommand
-                self.add_command(DeleteWireCommand(scene, wire,self.main_window))
-        
         # Store connector data for recreation
         self.pin_ids = connector_item.pin_ids
+        self.pins_data = []  # Store pin wire connections
+        
+        # Store which wires were connected to which pins
+        for pin in connector_item.pins:
+            wire_ids = [w.wid if hasattr(w, 'wid') else getattr(w, 'wire', object()).id 
+                       for w in pin.wires if w]
+            self.pins_data.append({
+                'pin_id': pin.original_id or pin.pid,
+                'wire_ids': wire_ids
+            })
+
+        
+        
+
         self.properties = {
             'part_number': getattr(connector_item, 'part_number', None),
             'manufacturer': getattr(connector_item, 'manufacturer', None),
@@ -75,15 +84,15 @@ class DeleteConnectorCommand(CompoundCommand):
         }
     
     def redo(self):
+         # Call cleanup on connector before removing
+        self.connector.cleanup()
+        
         # Remove connector from scene
         self.scene.removeItem(self.connector)
         
         # Remove from main window lists
-        if hasattr(self.scene.parent(), 'conns') and self.connector in self.scene.parent().conns:
-            self.scene.parent().conns.remove(self.connector)
-        
-        # Execute wire deletions
-        super().redo()
+        if hasattr(self.main_window, 'conns') and self.connector in self.main_window.conns:
+            self.main_window.conns.remove(self.connector)
         
         self.main_window.refresh_tree_views()
     
@@ -103,18 +112,24 @@ class DeleteConnectorCommand(CompoundCommand):
                 setattr(new_connector, key, value)
         
         # Setup topology
-        new_connector.set_topology_manager(self.scene.parent().topology_manager)
-        new_connector.set_main_window(self.scene.parent())
+        new_connector.set_topology_manager(self.main_window.topology_manager)
+        new_connector.set_main_window(self.main_window)
         new_connector.create_topology_node()
         
+        # Add to scene
         self.scene.addItem(new_connector)
-        self.scene.parent().conns.append(new_connector)
+        self.main_window.conns.append(new_connector)
+        
+        # Recreate tree item
+        item = QTreeWidgetItem([new_connector.cid])
+        item.setData(0, Qt.UserRole, new_connector)
+        self.main_window.connectors_tree.addTopLevelItem(item)
+        new_connector.tree_item = item
+        
         self.connector = new_connector
         
-        # Undo wire deletions (recreate wires)
-        super().undo()
-        
-        self.scene.parent().refresh_tree_views()
+        self.main_window.refresh_tree_views()
+
 
 
 class MoveConnectorCommand(BaseCommand):

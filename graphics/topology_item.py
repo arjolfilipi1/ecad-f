@@ -65,6 +65,9 @@ class JunctionGraphicsItem(QGraphicsEllipseItem):
                 if hasattr(segment, 'graphics_item'):
                     segment.graphics_item.update_path()
         return super().itemChange(change, value)
+    def cleanup(self):
+        """Clean up junction references"""
+        pass
 
 class BranchPointGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of a branch point"""
@@ -129,3 +132,7 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
                 if hasattr(segment, 'graphics_item'):
                     segment.graphics_item.update_path()
         return super().itemChange(change, value)
+    def cleanup(self):
+        """Clean up branch point references"""
+        # No tree item for branch points currently, but add for future
+        pass

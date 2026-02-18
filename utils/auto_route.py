@@ -69,6 +69,7 @@ class HarnessAutoRouter:
         # Force update of connectors to refresh wires
         for c in self.main_window.conns:
             c.update()
+            c._update_connected_segments()
         
         print("=== AUTO-ROUTING COMPLETED ===\n")
         

@@ -11,6 +11,7 @@ class TopologyManager:
     def __init__(self):
         self.nodes: Dict[str, TopologyNode] = {}
         self.segments: Dict[str, WireSegment] = {}
+        self.branches: Dict[str, HarnessBranch] = {}  # NEW
         self.bundles: Dict[str, Bundle] = {}
         self.wires: Dict[str, Wire] = {}
         self.connection_points: Dict[str, ConnectionPoint] = {}

@@ -3,6 +3,7 @@ from model.topology_manager import TopologyManager
 from graphics.topology_item import (
     JunctionGraphicsItem, BranchPointGraphicsItem
 )
+from PyQt5 import sip
 from graphics.segment_item import SegmentGraphicsItem
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow,QGraphicsScene,QToolBar,QAction,QDialog,QVBoxLayout,QLabel,
@@ -62,7 +63,7 @@ class MainWindow(QMainWindow):
         
         self.viz_manager = VisualizationManager(self)
         self._create_main_toolbar()      # Basic editing tools
-        self._create_topology_toolbar()   # Topology/routing tools
+
         self._create_import_toolbar()     # Import/export tools
         self._create_view_toolbar()       # Visualization tools
         
@@ -101,19 +102,30 @@ class MainWindow(QMainWindow):
         # space_shortcut = QShortcut(Qt.Key_Space, self)
         # space_shortcut.activated.connect(self.toggle_selection_mode)
 
+        from graphics.branch_drawing_tool import BranchDrawingTool
+        self.branch_drawing_tool = BranchDrawingTool(self)
         
+        # Install event filter for mouse events
+        self.view.viewport().installEventFilter(self)
+
         
         # Apply theme
         self.setStyleSheet(self.settings_manager.get_theme_stylesheet())
 
+        # Add branch list dock
+        from graphics.branch_list_dock import BranchListDock
+        self.branch_dock = BranchListDock(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.branch_dock)
 
         # Demo objects
         
         # self.create_harness_example()
         self.refresh_connector_labels()
         self.view._scene.selectionChanged.connect(self.on_scene_selection)
-    
-    
+        self._create_topology_toolbar()   # Topology/routing tools
+        self.statusBar().showMessage(
+            "Loading complete...", 0
+        )
     def select_all(self):
         """Select all items in scene"""
         for item in self.scene.items():
@@ -165,7 +177,8 @@ class MainWindow(QMainWindow):
         self.redo_act = QAction("↪ Redo", self)
         self.redo_act.triggered.connect(self.undo_manager.redo)
         toolbar.addAction(self.redo_act)
-        
+        self.redo_act.setEnabled(False)
+        self.redo_act.setEnabled(False)
         toolbar.addSeparator()
         
         # Selection tools
@@ -334,24 +347,62 @@ class MainWindow(QMainWindow):
 
     def refresh_tree_views(self):
         """Refresh tree widget contents - ONLY SHOW CONNECTORS AND ROUTED WIRES"""
+        # Block signals to prevent triggering selection events
+        self.connectors_tree.blockSignals(True)
+        self.wires_tree.blockSignals(True)
+        
+        # Clear trees (this properly deletes all items)
         self.connectors_tree.clear()
         self.wires_tree.clear()
         
         # Show connectors
         for conn in self.conns:
-            item = QTreeWidgetItem([conn.cid])
-            item.setData(0, Qt.UserRole, conn)
-            self.connectors_tree.addTopLevelItem(item)
-            conn.tree_item = item
+            # Check if connector still in scene and not deleted
+            if conn and conn.scene() == self.scene:
+                try:
+                    item = QTreeWidgetItem([conn.cid])
+                    item.setData(0, Qt.UserRole, conn)
+                    self.connectors_tree.addTopLevelItem(item)
+                    conn.tree_item = item
+                except RuntimeError:
+                    # Connector was deleted, skip
+                    pass
         
-        # Show ONLY ROUTED WIRES (SegmentedWireItem), NOT direct WireItem
+        # Show wires
+        wire_items = []
+        
+        # Add routed wires if they exist
         if hasattr(self, 'routed_wire_items'):
-            for wire_graphics in self.routed_wire_items:
-                if hasattr(wire_graphics, 'wire') and wire_graphics.wire:
-                    item = QTreeWidgetItem([wire_graphics.wire.id])
+            wire_items.extend(self.routed_wire_items)
+        
+        # Add imported wires if they exist
+        if hasattr(self, 'imported_wire_items'):
+            wire_items.extend(self.imported_wire_items)
+        
+        for wire_graphics in wire_items:
+            try:
+                if wire_graphics and wire_graphics.scene() == self.scene:
+                    # Get display name
+                    if hasattr(wire_graphics, 'wire') and wire_graphics.wire:
+                        display_name = wire_graphics.wire.id
+                    elif hasattr(wire_graphics, 'wid'):
+                        display_name = wire_graphics.wid
+                    else:
+                        display_name = "Wire"
+                    
+                    item = QTreeWidgetItem([display_name])
                     item.setData(0, Qt.UserRole, wire_graphics)
                     self.wires_tree.addTopLevelItem(item)
                     wire_graphics.tree_item = item
+            except RuntimeError:
+                # Wire was deleted, skip
+                pass
+        
+        # Unblock signals
+        self.connectors_tree.blockSignals(False)
+        self.wires_tree.blockSignals(False)
+
+
 
     
     def on_scene_selection(self):
@@ -361,9 +412,37 @@ class MainWindow(QMainWindow):
             return
 
         obj = items[0]
+        
+        # Check if object has a tree_item
         if hasattr(obj, "tree_item") and obj.tree_item:
-            tree = obj.tree_item.treeWidget()
-            tree.setCurrentItem(obj.tree_item)
+            try:
+                # Try to access tree_item - will raise RuntimeError if deleted
+                tree = obj.tree_item.treeWidget()
+                
+                # Check if tree still exists and contains this item
+                if tree and not sip.isdeleted(tree):
+                    # Verify item is still in tree
+                    if tree.indexOfTopLevelItem(obj.tree_item) >= 0:
+                        tree.setCurrentItem(obj.tree_item)
+                        
+                        # If it's a connector, show its pins
+                        if isinstance(obj, ConnectorItem):
+                            print(f"\nSelected {obj.cid}:")
+                            for pin in obj.pins:
+                                pos = pin.scene_position()
+                                print(f"  {pin.pid} at {pos}")
+                    else:
+                        # Item not in tree, clear reference
+                        obj.tree_item = None
+                else:
+                    # Tree is destroyed, clear reference
+                    obj.tree_item = None
+                    
+            except RuntimeError:
+                # Tree item was deleted, clear reference
+                obj.tree_item = None
+
+
             
 
     def _create_test_menu(self):
@@ -372,8 +451,8 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(import_action)
         
     def delete_wires(self):
-        print("undo",self.undo_manager.undo_stack.count())
-        print("self",self.undo_stack)
+        print("undo",self.topology_manager.branches)
+
     
     def import_from_excel(self):
         """Import Excel file with wires only (no topology)"""
@@ -455,12 +534,22 @@ class MainWindow(QMainWindow):
         
         self.manual_router.create_segment_between_selected()
 
-
+    def _create_branch_toolbar(self):
+        if hasattr(self, 'branch_drawing_tool'):
+            btb = self.branch_drawing_tool._create_toolbar()
+            self.addToolBar(btb)
+        return toolbar
     def _create_topology_toolbar(self):
         """Topology and routing tools (row 1, after main tools)"""
         toolbar = QToolBar("Topology Tools")
         toolbar.setObjectName("TopologyToolBar")
         toolbar.setMovable(True)
+        
+        # Add branch drawing button (from branch drawing tool)
+        if hasattr(self, 'branch_drawing_tool'):
+            toolbar.addAction(self.branch_drawing_tool.draw_action)
+        
+        toolbar.addSeparator()
         
         # Add branch point tool
         add_branch = QAction("⬤ Branch Point", self)
@@ -484,6 +573,7 @@ class MainWindow(QMainWindow):
         
         self.addToolBar(toolbar)
         return toolbar
+
 
     def add_branch_point(self):
         """Add a branch point at mouse position"""
@@ -574,11 +664,27 @@ class MainWindow(QMainWindow):
 
 
     def on_tree_clicked(self, item):
-        obj = item.data(0, Qt.UserRole)
-        if obj:
-            self.view.scene().clearSelection()
-            obj.setSelected(True)
-            self.view.centerOn(obj)
+        """Handle tree item click - select corresponding scene item"""
+        try:
+            obj = item.data(0, Qt.UserRole)
+            if obj:
+                # Check if object still exists in scene
+                if obj.scene() == self.scene:
+                    self.view.scene().clearSelection()
+                    obj.setSelected(True)
+                    self.view.centerOn(obj)
+                else:
+                    # Object no longer in scene, remove from tree
+                    tree = item.treeWidget()
+                    if tree and not sip.isdeleted(tree):
+                        index = tree.indexOfTopLevelItem(item)
+                        if index >= 0:
+                            tree.takeTopLevelItem(index)
+        except RuntimeError:
+            # Item was deleted, ignore
+            pass
+
+
 
     def show_props(self):
         """Create and show property editor dock"""
@@ -847,19 +953,17 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.No:
                 return
         
-        # Ask for project name
         name, ok = QInputDialog.getText(self, "New Project", "Project Name:")
         if ok and name:
-            # Clear current scene
-            self.scene.clear()
-            self.conns = []
-            self.wires = []
+            # Clear current scene properly
+            self.clear_scene()
             
             # Create new project
             self.project_handler.new_project(name)
             self.setWindowTitle(f"ECAD - {name}")
             
             self.statusBar().showMessage(f"Created new project: {name}", 3000)
+
 
     def open_project(self,*args):
         """Open an existing project"""
@@ -1237,7 +1341,7 @@ class MainWindow(QMainWindow):
     def add_connector_with_undo(self, connector_item, pos):
         """Add connector with undo support"""
         from commands.connector_commands import AddConnectorCommand
-        cmd = AddConnectorCommand(self.scene, connector_item, pos)
+        cmd = AddConnectorCommand(scene = self.scene, connector_item = connector_item, pos = pos,main_window = self)
         self.undo_manager.push(cmd)
 
     def delete_selected_with_undo(self):
@@ -1314,6 +1418,48 @@ class MainWindow(QMainWindow):
             self.undo_dock = self.undo_manager.create_undo_view()
             self.addDockWidget(Qt.RightDockWidgetArea, self.undo_dock)
         self.undo_dock.show()
+    def clear_scene(self):
+        """Clear the scene and all associated data"""
+        # Clear tree widgets
+        self.connectors_tree.clear()
+        self.wires_tree.clear()
+        
+        # Clear lists
+        for conn in self.conns:
+            conn.cleanup()
+        self.conns.clear()
+        
+        if hasattr(self, 'imported_wire_items'):
+            for wire in self.imported_wire_items:
+                wire.cleanup()
+            self.imported_wire_items.clear()
+        
+        if hasattr(self, 'routed_wire_items'):
+            for wire in self.routed_wire_items:
+                wire.cleanup()
+            self.routed_wire_items.clear()
+        
+        self.wires.clear()
+        
+        # Clear scene
+        self.scene.clear()
+    def eventFilter(self, obj, event):
+        """Filter events for branch drawing mode"""
+        if obj == self.view.viewport() and hasattr(self, 'branch_drawing_tool'):
+            tool = self.branch_drawing_tool
+            
+            if tool.draw_action.isChecked():
+                if event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
+                    tool.on_mouse_press(event)
+                    return True
+                elif event.type() == event.MouseMove:
+                    tool.on_mouse_move(event)
+                    return True
+                elif event.type() == event.MouseButtonDblClick:
+                    tool.on_mouse_double_click(event)
+                    return True
+        
+        return super().eventFilter(obj, event)
 
 app = QApplication(sys.argv)
 window = MainWindow()
