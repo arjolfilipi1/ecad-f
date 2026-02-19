@@ -102,20 +102,25 @@ class MainWindow(QMainWindow):
         # space_shortcut = QShortcut(Qt.Key_Space, self)
         # space_shortcut.activated.connect(self.toggle_selection_mode)
 
-        from graphics.branch_drawing_tool import BranchDrawingTool
-        self.branch_drawing_tool = BranchDrawingTool(self)
+        self._create_bundle_toolbar()
+    
+        # Store original mouse events for restoration
+        self.view.original_mousePressEvent = self.view.mousePressEvent
+        self.view.original_mouseMoveEvent = self.view.mouseMoveEvent
+        self.view.original_mouseReleaseEvent = self.view.mouseReleaseEvent
+        
+        # Bundles list
+        self.bundles = []
+
         
         # Install event filter for mouse events
         self.view.viewport().installEventFilter(self)
-
+        
         
         # Apply theme
         self.setStyleSheet(self.settings_manager.get_theme_stylesheet())
 
-        # Add branch list dock
-        from graphics.branch_list_dock import BranchListDock
-        self.branch_dock = BranchListDock(self)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.branch_dock)
+
 
         # Demo objects
         
@@ -586,11 +591,8 @@ class MainWindow(QMainWindow):
         
         self.manual_router.create_segment_between_selected()
 
-    def _create_branch_toolbar(self):
-        if hasattr(self, 'branch_drawing_tool'):
-            btb = self.branch_drawing_tool._create_toolbar()
-            self.addToolBar(btb)
-        return toolbar
+
+
     def add_fastener_node(self):
         """Add a fastener node at cursor position"""
         pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
@@ -622,9 +624,7 @@ class MainWindow(QMainWindow):
         toolbar.setObjectName("TopologyToolBar")
         toolbar.setMovable(True)
         
-        # Add branch drawing button (from branch drawing tool)
-        if hasattr(self, 'branch_drawing_tool'):
-            toolbar.addAction(self.branch_drawing_tool.draw_action)
+
         
         toolbar.addSeparator()
         
@@ -1525,20 +1525,7 @@ class MainWindow(QMainWindow):
         
         # Clear scene
         self.scene.clear()
-    def eventFilter(self, obj, event):
-        """Filter events for branch drawing mode"""
-        if obj == self.view.viewport() and hasattr(self, 'branch_drawing_tool'):
-            tool = self.branch_drawing_tool
-            
-            if tool.draw_action.isChecked():
-                if event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
-                    tool.on_mouse_press(event)
-                    return True
-                elif event.type() == event.MouseMove:
-                    tool.on_mouse_move(event)
-                    return True
-        
-        return super().eventFilter(obj, event)
+
     def create_branch_from_selection(self):
         """Create a new branch from selected nodes"""
         selected = self.scene.selectedItems()
@@ -1661,6 +1648,22 @@ class MainWindow(QMainWindow):
         elif hasattr(item, 'junction_node'):
             return item.junction_node
         return None
+    def _create_bundle_toolbar(self):
+        """Create bundle drawing toolbar"""
+        from graphics.bundle_toolbar import BundleToolbar
+        self.bundle_toolbar = BundleToolbar(self)
+        self.addToolBar(Qt.TopToolBarArea, self.bundle_toolbar)
+
+    def assign_wires_to_bundles(self):
+        """Auto-assign wires to drawn bundles"""
+        if not hasattr(self, 'bundles') or not self.bundles:
+            QMessageBox.warning(self, "No Bundles", "Draw some bundles first")
+            return
+        
+        # This would implement wire-to-bundle assignment
+        # For now, just show message
+        self.statusBar().showMessage("Wire assignment coming soon", 3000)
+
 app = QApplication(sys.argv)
 window = MainWindow()
 window.resize(1000, 800)
