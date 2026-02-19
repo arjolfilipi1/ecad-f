@@ -5,7 +5,7 @@ from PyQt5.QtGui import QBrush, QFont, QPen, QColor, QPainter, QPainterPath
 from .pin_item import PinItem
 from itertools import count
 from typing import Union, List,Optional
-
+from PyQt5 import sip
 class ConnectorItem(QGraphicsRectItem):
     _ids = count(0)
     
@@ -273,11 +273,14 @@ class ConnectorItem(QGraphicsRectItem):
         """Remove tree item references before deletion"""
         if self.tree_item:
             # Remove from tree widget
-            tree = self.tree_item.treeWidget()
-            if tree:
-                index = tree.indexOfTopLevelItem(self.tree_item)
-                if index >= 0:
-                    tree.takeTopLevelItem(index)
+            try:
+                tree = self.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    index = tree.indexOfTopLevelItem(self.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except:
+                pass
             self.tree_item = None
         
         # Clear pin references

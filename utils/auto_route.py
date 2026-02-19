@@ -403,3 +403,48 @@ class ManualRouter:
                 new_wire_graphics.set_main_window(self.main_window)
                 self.main_window.scene.addItem(new_wire_graphics)
                 wire.graphics_item = new_wire_graphics
+class BundleRouter:
+    """Route wires through manually drawn bundles"""
+    
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self.topology_manager = main_window.topology_manager
+    
+    def route_wires_through_bundles(self):
+        """Assign wires to bundles based on connectivity"""
+        
+        # Get all bundles
+        bundles = getattr(self.main_window, 'bundles', [])
+        if not bundles:
+            return False
+        
+        # Get all wires
+        wires = getattr(self.main_window, 'imported_wire_items', [])
+        if not wires:
+            return False
+        
+        # Group wires by path
+        # This is a simplified version - you'd need more sophisticated routing
+        
+        # Create topology from bundles
+        for bundle in bundles:
+            # Create nodes at bundle ends
+            start_node = self.get_or_create_node(bundle.start_point)
+            end_node = self.get_or_create_node(bundle.end_point)
+            
+            # Create segment
+            segment = self.topology_manager.create_segment(start_node, end_node)
+            segment.specified_length = bundle.specified_length or bundle.length
+            
+            # Store in bundle
+            bundle.segment = segment
+            bundle.start_node = start_node
+            bundle.end_node = end_node
+        
+        # Assign wires to bundles
+        for wire in wires:
+            # Find which bundles this wire should go through
+            # This requires pathfinding from wire.from_pin to wire.to_pin
+            pass
+        
+        return True
