@@ -8,10 +8,11 @@ from graphics.segment_item import SegmentGraphicsItem
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow,QGraphicsScene,QToolBar,QAction,QDialog,QVBoxLayout,QLabel,
     QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog,QGraphicsItem,QInputDialog,
-    QShortcut
+    QShortcut,QHeaderView,QWidget,QPushButton,QHBoxLayout,QComboBox,QGroupBox,QFormLayout,
+    QLineEdit,QDoubleSpinBox,QMessageBox
     
 )
-from PyQt5.QtGui import QCursor,QPainter,QKeySequence
+from PyQt5.QtGui import QCursor,QPainter,QKeySequence,QColor
 from graphics.schematic_view import SchematicView
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import SegmentedWireItem,WireItem
@@ -27,28 +28,32 @@ from commands.base_command import BaseCommand
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-
+        self.imported_wire_items = []
         from commands.undo_manager import UndoManager
         self.undo_manager = UndoManager(self)
         self.scene = QGraphicsScene(-2000, -2000, 4000, 4000)
         self.view = SchematicView(self.scene,self)
         self.setCentralWidget(self.view)
+        
+        # Create objects dock with tabs
         self.objects_dock = QDockWidget("Objects", self)
         self.objects_tabs = QTabWidget()
         self.objects_tabs.setTabsClosable(False)
-        #connector tree
+        
+        # Connector tree
         self.connectors_tree = QTreeWidget()
         self.connectors_tree.setHeaderLabels(["Connector"])
         self.connectors_tree.itemClicked.connect(self.on_tree_clicked)
-        #connector tree
-        self.wires_tree = QTreeWidget()
-        self.wires_tree.setHeaderLabels(["Wire"])
-        self.wires_tree.itemClicked.connect(self.on_tree_clicked)
+        
+        # Wires tab with add button
+        self.wires_tab = self.create_wires_tab()
+        
         self.objects_tabs.addTab(self.connectors_tree, "Connectors")
-        self.objects_tabs.addTab(self.wires_tree, "Wires")
-
+        self.objects_tabs.addTab(self.wires_tab, "Wires")
+        
         self.objects_dock.setWidget(self.objects_tabs)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.objects_dock)
+
         
         self.show_props()
         self.view._scene.selectionChanged.connect(self.on_selection)
@@ -109,8 +114,14 @@ class MainWindow(QMainWindow):
         self.view.original_mouseMoveEvent = self.view.mouseMoveEvent
         self.view.original_mouseReleaseEvent = self.view.mouseReleaseEvent
         
-        # Bundles list
+        # Create bundles dock
+        self._create_bundles_dock()
+        
+
+        
+        # Initialize bundles list
         self.bundles = []
+        self._create_edit_menu()
 
         
         # Install event filter for mouse events
@@ -187,13 +198,13 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         
         # Selection tools
-        select_all = QAction("🔲 Select All", self)
-        select_all.triggered.connect(self.select_all)
-        toolbar.addAction(select_all)
+        self.select_all_action = QAction("🔲 Select All", self)
+        self.select_all_action.triggered.connect(self.select_all)
+        toolbar.addAction(self.select_all_action)
         
-        clear_sel = QAction("❌ Clear Selection", self)
-        clear_sel.triggered.connect(self.clear_selection)
-        toolbar.addAction(clear_sel)
+        self.clear_selection_action = QAction("❌ Clear Selection", self)
+        self.clear_selection_action.triggered.connect(self.clear_selection)
+        toolbar.addAction(self.clear_selection_action)
         
         self.addToolBar(toolbar)
         return toolbar
@@ -430,12 +441,8 @@ class MainWindow(QMainWindow):
                     if tree.indexOfTopLevelItem(obj.tree_item) >= 0:
                         tree.setCurrentItem(obj.tree_item)
                         
-                        # If it's a connector, show its pins
-                        if isinstance(obj, ConnectorItem):
-                            print(f"\nSelected {obj.cid}:")
-                            for pin in obj.pins:
-                                pos = pin.scene_position()
-                                print(f"  {pin.pid} at {pos}")
+
+
                     else:
                         # Item not in tree, clear reference
                         obj.tree_item = None
@@ -456,8 +463,9 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(import_action)
         
     def delete_wires(self):
-        print("undo",self.topology_manager.branches)
-
+        for b in self.bundles:
+            print(b.bundle_id,b.wire_count)
+        pass
     
     def import_from_excel(self):
         """Import Excel file with wires only (no topology)"""
@@ -593,31 +601,6 @@ class MainWindow(QMainWindow):
 
 
 
-    def add_fastener_node(self):
-        """Add a fastener node at cursor position"""
-        pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
-        
-        # Ask for fastener type
-        from PyQt5.QtWidgets import QInputDialog
-        types = ["cable_tie", "clip", "clamp", "adhesive_clip", "other"]
-        fastener_type, ok = QInputDialog.getItem(
-            self, "Fastener Type", "Select fastener type:", types, 0, False
-        )
-        
-        if ok:
-            part_number, ok2 = QInputDialog.getText(
-                self, "Part Number", "Enter part number (optional):"
-            )
-            
-            fastener_node = self.topology_manager.create_fastener_node(
-                (pos.x(), pos.y()),
-                fastener_type=fastener_type,
-                part_number=part_number if part_number else None
-            )
-            
-            from graphics.topology_item import FastenerGraphicsItem
-            fastener_graphics = FastenerGraphicsItem(fastener_node)
-            self.scene.addItem(fastener_graphics)
     def _create_topology_toolbar(self):
         """Topology and routing tools (row 1, after main tools)"""
         toolbar = QToolBar("Topology Tools")
@@ -721,6 +704,14 @@ class MainWindow(QMainWindow):
         if not wire:
             self.statusBar().showMessage("Wire could not be created", 3000)
             return    
+        wi = wire = WireItem(
+            wire.id,
+            from_pin,
+            to_pin,
+            wire.color_data.base_color,
+            wire.net
+        )
+        self.imported_wire_items.append(wi)
         # Create graphics
         wire_graphics = SegmentedWireItem(wire)
         self.scene.addItem(wire_graphics)
@@ -1663,6 +1654,562 @@ class MainWindow(QMainWindow):
         # This would implement wire-to-bundle assignment
         # For now, just show message
         self.statusBar().showMessage("Wire assignment coming soon", 3000)
+    def _create_bundles_dock(self):
+        """Create dock widget for bundles tree"""
+        self.bundles_dock = QDockWidget("Bundles", self)
+        self.bundles_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        
+        # Create tree widget
+        self.bundles_tree = QTreeWidget()
+        self.bundles_tree.setHeaderLabels(["Bundle", "Length", "Wires"])
+        self.bundles_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.bundles_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.bundles_tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.bundles_tree.itemClicked.connect(self.on_bundle_tree_clicked)
+        self.bundles_tree.itemSelectionChanged.connect(self.on_bundle_selection_changed)
+        
+        self.bundles_dock.setWidget(self.bundles_tree)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.bundles_dock)
+
+    
+    
+    def refresh_bundle_tree(self):
+        """Refresh the bundles tree with wire counts"""
+        if not hasattr(self, 'bundles_tree'):
+            return
+        
+        self.bundles_tree.blockSignals(True)
+        self.bundles_tree.clear()
+        
+        for bundle in self.bundles:
+            # Check if bundle still exists
+            if bundle and bundle.scene() == self.scene:
+                # Create display text with wire count
+                display_name = getattr(bundle, 'name', bundle.bundle_id)
+                
+                # Length text
+                if bundle.specified_length:
+                    length_text = f"{bundle.specified_length:.0f} mm"
+                else:
+                    length_text = f"{bundle.length:.0f} units"
+                
+                # Wire count text
+                wires_text = str(bundle.wire_count)
+                
+                item = QTreeWidgetItem([display_name, length_text, wires_text])
+                item.setData(0, Qt.UserRole, bundle)
+                
+                # Color based on wire count
+                if bundle.wire_count > 0:
+                    if bundle.wire_count < 5:
+                        item.setForeground(0, Qt.darkGreen)  # Few wires
+                    elif bundle.wire_count < 15:
+                        item.setForeground(0, Qt.darkBlue)   # Medium bundle
+                    else:
+                        item.setForeground(0, Qt.darkRed)    # Large bundle
+                else:
+                    item.setForeground(0, Qt.gray)
+                    item.setForeground(0, Qt.gray)  # Empty bundles in gray
+                
+                self.bundles_tree.addTopLevelItem(item)
+                bundle.tree_item = item
+        
+        self.bundles_tree.blockSignals(False)
+
+
+
+    def on_bundle_tree_clicked(self, item):
+        """Handle bundle tree item click"""
+        bundle = item.data(0, Qt.UserRole)
+        if bundle and bundle.scene() == self.scene:
+            # Clear other selections
+            for selected in self.scene.selectedItems():
+                selected.setSelected(False)
+            
+            bundle.setSelected(True)
+            self.view.centerOn(bundle)
+            
+            # Update property editor
+            if hasattr(self, 'bundle_property_editor'):
+                self.bundle_property_editor.set_bundle(bundle)
+
+    def on_bundle_selection_changed(self):
+        """Handle bundle tree selection change"""
+        selected = self.bundles_tree.selectedItems()
+        if selected:
+            bundle = selected[0].data(0, Qt.UserRole)
+            if hasattr(self, 'bundle_property_editor'):
+                self.bundle_property_editor.set_bundle(bundle)
+
+    def delete_selected_bundles(self):
+        """Delete selected bundles with undo"""
+        selected = self.scene.selectedItems()
+        bundles = [item for item in selected if hasattr(item, 'bundle_id')]
+        
+        if not bundles:
+            return
+        
+        self.undo_manager.begin_macro(f"Delete {len(bundles)} Bundle(s)")
+        
+        for bundle in bundles:
+            from commands.bundle_commands import DeleteBundleCommand
+            cmd = DeleteBundleCommand(self.scene, bundle, self)
+            self.undo_manager.push(cmd)
+        
+        self.undo_manager.end_macro()
+    def _create_edit_menu(self):
+        """Create edit menu with bundle actions"""
+        menubar = self.menuBar()
+        
+        # Find or create Edit menu
+        edit_menu = None
+        for action in menubar.actions():
+            if action.text() == "&Edit":
+                edit_menu = action.menu()
+                break
+        
+        if not edit_menu:
+            edit_menu = menubar.addMenu("&Edit")
+        
+        # Add existing undo/redo
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
+        
+        # Add bundle actions
+        select_all_bundles = QAction("Select All Bundles", self)
+        select_all_bundles.triggered.connect(self.select_all_bundles)
+        edit_menu.addAction(select_all_bundles)
+        
+        delete_bundles = QAction("Delete Selected Bundles", self)
+        delete_bundles.setShortcut("Del")
+        delete_bundles.triggered.connect(self.delete_selected_bundles)
+        edit_menu.addAction(delete_bundles)
+        
+        edit_menu.addSeparator()
+        
+        # Add existing select all
+        edit_menu.addAction(self.select_all_action)
+        edit_menu.addAction(self.clear_selection_action)
+
+    def select_all_bundles(self):
+        """Select all bundle items in scene"""
+        for item in self.scene.items():
+            if hasattr(item, 'bundle_id'):
+                item.setSelected(True)
+    def create_wires_tab(self) -> QWidget:
+        """Create wires tab with add wire button and inline input"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
+        
+        # Add Wire button
+        self.add_wire_btn = QPushButton("➕ Add Wire")
+        self.add_wire_btn.clicked.connect(self.toggle_wire_input)
+        layout.addWidget(self.add_wire_btn)
+        
+        # Inline input container (initially hidden)
+        self.wire_input_container = QWidget()
+        self.wire_input_container.setVisible(False)
+        input_layout = QVBoxLayout(self.wire_input_container)
+        input_layout.setContentsMargins(5, 5, 5, 5)
+        input_layout.setSpacing(3)
+        
+        # Style for input container
+        self.wire_input_container.setStyleSheet("""
+            QWidget {
+                background-color: #f0f0f0;
+                border: 1px solid #c0c0c0;
+                border-radius: 3px;
+            }
+            QLabel {
+                font-size: 10px;
+                font-weight: bold;
+                color: #333;
+            }
+            QComboBox, QLineEdit, QDoubleSpinBox {
+                background-color: white;
+                border: 1px solid #c0c0c0;
+                border-radius: 2px;
+                padding: 3px;
+                font-size: 10px;
+                min-height: 18px;
+            }
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                border-radius: 2px;
+                padding: 5px;
+                font-size: 10px;
+                font-weight: bold;
+                min-height: 20px;
+            }
+            QPushButton:hover {
+                background-color: #106ebe;
+            }
+            QPushButton:pressed {
+                background-color: #005a9e;
+            }
+            QPushButton#cancelBtn {
+                background-color: #6c757d;
+            }
+            QPushButton#cancelBtn:hover {
+                background-color: #5a6268;
+            }
+        """)
+        
+        # Title
+        title = QLabel("Add New Wire")
+        title.setAlignment(Qt.AlignCenter)
+        input_layout.addWidget(title)
+        
+        # From connector selection
+        from_layout = QHBoxLayout()
+        from_layout.addWidget(QLabel("From:"))
+        self.from_connector_combo = QComboBox()
+        self.from_connector_combo.currentIndexChanged.connect(self.update_from_pins)
+        from_layout.addWidget(self.from_connector_combo)
+        input_layout.addLayout(from_layout)
+        
+        # From pin selection
+        from_pin_layout = QHBoxLayout()
+        from_pin_layout.addWidget(QLabel("Pin:"))
+        self.from_pin_combo = QComboBox()
+        from_pin_layout.addWidget(self.from_pin_combo)
+        input_layout.addLayout(from_pin_layout)
+        
+        # To connector selection
+        to_layout = QHBoxLayout()
+        to_layout.addWidget(QLabel("To:"))
+        self.to_connector_combo = QComboBox()
+        self.to_connector_combo.currentIndexChanged.connect(self.update_to_pins)
+        to_layout.addWidget(self.to_connector_combo)
+        input_layout.addLayout(to_layout)
+        
+        # To pin selection
+        to_pin_layout = QHBoxLayout()
+        to_pin_layout.addWidget(QLabel("Pin:"))
+        self.to_pin_combo = QComboBox()
+        to_pin_layout.addWidget(self.to_pin_combo)
+        input_layout.addLayout(to_pin_layout)
+        
+        # Wire properties
+        props_group = QGroupBox("Wire Properties")
+        props_group.setStyleSheet("QGroupBox { font-weight: bold; font-size: 10px; }")
+        props_layout = QFormLayout(props_group)
+        props_layout.setSpacing(3)
+        props_layout.setContentsMargins(5, 10, 5, 5)
+        
+        # Signal name
+        self.wire_signal = QLineEdit()
+        self.wire_signal.setPlaceholderText("e.g., ABS_Sensor")
+        props_layout.addRow("Signal:", self.wire_signal)
+        
+        # Wire color
+        color_layout = QHBoxLayout()
+        self.wire_color = QComboBox()
+        colors = ['SW', 'RT', 'GN', 'BL', 'GE', 'BR', 'WS', 'GR', 'VT', 'OR', 'RS']
+        self.wire_color.addItems(colors)
+        self.wire_color.setEditable(True)
+        color_layout.addWidget(self.wire_color)
+        
+        # Color preview
+        self.color_preview = QLabel("   ")
+        self.color_preview.setFixedSize(20, 16)
+        self.color_preview.setStyleSheet("background-color: black; border: 1px solid gray;")
+        self.wire_color.currentTextChanged.connect(self.update_color_preview)
+        color_layout.addWidget(self.color_preview)
+        props_layout.addRow("Color:", color_layout)
+        
+        # Cross section
+        self.wire_cross_section = QDoubleSpinBox()
+        self.wire_cross_section.setRange(0.1, 10.0)
+        self.wire_cross_section.setValue(0.5)
+        self.wire_cross_section.setSingleStep(0.1)
+        self.wire_cross_section.setSuffix(" mm²")
+        props_layout.addRow("Cross Section:", self.wire_cross_section)
+        
+        # Part number (optional)
+        self.wire_part_number = QLineEdit()
+        self.wire_part_number.setPlaceholderText("Optional")
+        props_layout.addRow("Part #:", self.wire_part_number)
+        
+        input_layout.addWidget(props_group)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        
+        self.create_wire_btn = QPushButton("Create Wire")
+        self.create_wire_btn.clicked.connect(self.create_new_wire)
+        btn_layout.addWidget(self.create_wire_btn)
+        
+        self.cancel_wire_btn = QPushButton("Cancel")
+        self.cancel_wire_btn.setObjectName("cancelBtn")
+        self.cancel_wire_btn.clicked.connect(self.toggle_wire_input)
+        btn_layout.addWidget(self.cancel_wire_btn)
+        
+        input_layout.addLayout(btn_layout)
+        
+        # Add container to main layout
+        layout.addWidget(self.wire_input_container)
+        
+        # Wire tree
+        self.wires_tree = QTreeWidget()
+        self.wires_tree.setHeaderLabels(["Wire"])
+        self.wires_tree.itemClicked.connect(self.on_tree_clicked)
+        layout.addWidget(self.wires_tree)
+        
+        return widget
+
+    def toggle_wire_input(self):
+        """Toggle the wire input container visibility"""
+        self.wire_input_container.setVisible(not self.wire_input_container.isVisible())
+        
+        if self.wire_input_container.isVisible():
+            self.update_connector_combo_boxes()
+            self.add_wire_btn.setText("✖ Cancel")
+        else:
+            self.add_wire_btn.setText("➕ Add Wire")
+
+    def update_connector_combo_boxes(self):
+        """Update connector combo boxes with current connectors"""
+        self.from_connector_combo.clear()
+        self.to_connector_combo.clear()
+        
+        for conn in self.conns:
+            if conn and conn.scene() == self.scene:
+                display_text = f"{conn.cid}"
+                if hasattr(conn, 'part_number') and conn.part_number:
+                    display_text += f" ({conn.part_number})"
+                
+                self.from_connector_combo.addItem(display_text, conn)
+                self.to_connector_combo.addItem(display_text, conn)
+
+    def update_from_pins(self):
+        """Update from pin combo box based on selected connector"""
+        self.from_pin_combo.clear()
+        
+        conn = self.from_connector_combo.currentData()
+        if conn and hasattr(conn, 'pins'):
+            for pin in conn.pins:
+                # Check if pin is already used
+                is_used = len(pin.wires) > 0
+                display_text = str(pin.pid)
+                if hasattr(pin, 'original_id') and pin.original_id:
+                    display_text = str(pin.original_id)
+                
+                # Add indicator if pin is used
+                
+                if is_used:
+                    display_text += " (used)"
+                    self.from_pin_combo.addItem(display_text, pin)
+                else:
+                    self.from_pin_combo.addItem(display_text, pin)
+
+    def update_to_pins(self):
+        """Update to pin combo box based on selected connector"""
+        self.to_pin_combo.clear()
+        
+        conn = self.to_connector_combo.currentData()
+        if conn and hasattr(conn, 'pins'):
+            for pin in conn.pins:
+                # Check if pin is already used
+                is_used = len(pin.wires) > 0
+                display_text = str(pin.pid)
+                if hasattr(pin, 'original_id') and pin.original_id:
+                    display_text = str(pin.original_id)
+                
+                # Add indicator if pin is used
+                if is_used:
+                    display_text += " (used)"
+                    self.to_pin_combo.addItem(display_text, pin)
+                else:
+                    self.to_pin_combo.addItem(display_text, pin)
+
+    def update_color_preview(self, color_text):
+        """Update color preview based on selected color"""
+        color_map = {
+            'SW': QColor(0, 0, 0),
+            'RT': QColor(255, 0, 0),
+            'GN': QColor(0, 255, 0),
+            'BL': QColor(0, 0, 255),
+            'GE': QColor(255, 255, 0),
+            'BR': QColor(165, 42, 42),
+            'WS': QColor(255, 255, 255),
+            'GR': QColor(128, 128, 128),
+            'VT': QColor(128, 0, 128),
+            'OR': QColor(255, 165, 0),
+            'RS': QColor(255, 192, 203),
+        }
+        
+        color = color_map.get(color_text, QColor(200, 200, 200))
+        self.color_preview.setStyleSheet(f"background-color: {color.name()}; border: 1px solid gray;")
+    def create_new_wire(self):
+        """Create a new wire between selected connectors and pins"""
+        
+        # Get selected items
+        from_conn = self.from_connector_combo.currentData()
+        to_conn = self.to_connector_combo.currentData()
+        from_pin = self.from_pin_combo.currentData()
+        to_pin = self.to_pin_combo.currentData()
+        
+        # Validate
+        if not from_conn or not to_conn or not from_pin or not to_pin:
+            QMessageBox.warning(self, "Invalid Selection", 
+                               "Please select both connectors and pins")
+            return
+        
+        if from_conn == to_conn:
+            QMessageBox.warning(self, "Invalid Selection", 
+                               "From and To connectors cannot be the same")
+            return
+        
+        # Generate wire ID
+        wire_count = len(self.imported_wire_items) if hasattr(self, 'imported_wire_items') else 0
+        wire_id = f"W{wire_count + 1}"
+        
+        # Get wire properties
+        signal_name = self.wire_signal.text() or f"Signal_{wire_id}"
+        color = self.wire_color.currentText()
+        cross_section = self.wire_cross_section.value()
+        part_number = self.wire_part_number.text() or None
+        
+        # Create wire data
+        from utils.excel_import import ImportedWire
+        wire_data = ImportedWire(
+            wire_id=wire_id,
+            part_number=part_number,
+            cross_section=cross_section,
+            color=color,
+            from_device=from_conn.cid,
+            from_pin=from_pin.original_id if hasattr(from_pin, 'original_id') else from_pin.pid,
+            to_device=to_conn.cid,
+            to_pin=to_pin.original_id if hasattr(to_pin, 'original_id') else to_pin.pid,
+            signal_name=signal_name
+        )
+        
+        # Create wire item
+        from graphics.wire_item import WireItem
+        from model.netlist import Netlist
+        
+        netlist = Netlist()
+        self.topology_manager.set_netlist(netlist)
+        
+        net = netlist.connect(from_pin, to_pin)
+        
+        wire = WireItem(
+            wire_id,
+            from_pin,
+            to_pin,
+            color,
+            net
+        )
+        
+        # Store wire data
+        wire.wire_data = wire_data
+        wire.net = net
+        wire.signal_name = signal_name
+        wire.cross_section = cross_section
+        
+        # Add to scene
+        self.scene.addItem(wire)
+        
+        # Store in imported wires list
+        if not hasattr(self, 'imported_wire_items'):
+            self.imported_wire_items = []
+        self.imported_wire_items.append(wire)
+        
+        # Store wire data separately for routing
+        if not hasattr(self, 'imported_wires_data'):
+            self.imported_wires_data = []
+        self.imported_wires_data.append(wire_data)
+        
+        # Create undo command
+        from commands.wire_commands import AddWireCommand
+        cmd = AddWireCommand(
+            self.scene,
+            wire,
+            from_pin,
+            to_pin,
+            main_window=self
+        )
+        self.undo_manager.push(cmd)
+        
+        # Update connector info labels
+        from_conn.info.update_text()
+        to_conn.info.update_text()
+        
+        # Refresh tree
+        self.refresh_tree_views()
+        
+        # Hide input and show success
+        self.toggle_wire_input()
+        self.statusBar().showMessage(f"Wire {wire_id} created successfully", 3000)
+        
+        # If bundles exist, ask if user wants to route through them
+        if hasattr(self, 'bundles') and self.bundles:
+            reply = QMessageBox.question(
+                self,
+                "Route Through Bundles",
+                f"Wire created. Would you like to route it through existing bundles?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Route just this wire through bundles
+                self.route_single_wire_through_bundles(wire, wire_data)
+                
+    def route_single_wire_through_bundles(self, wire_item, wire_data):
+        """Route a single wire through existing bundles using node connections"""
+        from utils.bundle_router import BundleRouter
+        
+        router = BundleRouter(self)
+        
+        # Hide the direct wire
+        wire_item.setVisible(False)
+        
+        # Create a list with just this wire
+        wires = [wire_item]
+        
+        # Get bundles
+        bundles = getattr(self, 'bundles', [])
+        
+        # Build graph
+        router._ensure_bundle_nodes(bundles)
+        graph = router._build_bundle_graph(bundles)
+        
+        # Store created elements
+        created_segments = []
+        routed_wires = []
+        
+        # Route the wire
+        success = router._route_single_wire(wire_item, bundles, graph, created_segments, routed_wires)
+        
+        if success and routed_wires:
+            # Store routed wires
+            if not hasattr(self, 'routed_wire_items'):
+                self.routed_wire_items = []
+            self.routed_wire_items.extend(routed_wires)
+            
+            # Update wires list
+            self.wires = [item.wire for item in self.routed_wire_items if hasattr(item, 'wire')]
+            
+            self.statusBar().showMessage(f"Wire routed through bundles", 3000)
+            
+            # Update visualization
+            if hasattr(self, 'viz_manager'):
+                self.viz_manager.update_visibility()
+        else:
+            # Show the wire again if no path found
+            wire_item.setVisible(True)
+            QMessageBox.information(
+                self,
+                "No Bundle Path",
+                "Could not find a bundle path connecting these connectors. Wire remains direct."
+            )
+
 
 app = QApplication(sys.argv)
 window = MainWindow()

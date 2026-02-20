@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QGraphicsPathItem, QGraphicsTextItem, QGraphicsItem
 from PyQt5.QtGui import QPainterPath, QPen, QColor, QFont, QPainter
 from PyQt5.QtCore import Qt, QPointF, QLineF
 import math
-
+from typing import List
 class BundleItem(QGraphicsPathItem):
     """Interactive bundle segment that can be drawn manually"""
     
@@ -18,8 +18,6 @@ class BundleItem(QGraphicsPathItem):
         self.bundle_id = bundle_id or f"B{id(self)}"
         self.start_point = start_point
         self.end_point = end_point or start_point
-        print("dec",start_point , end_point)
-        print(self.start_point , self.end_point)
         self.start_node = None
         self.end_node = None
         self.length = 0.0
@@ -33,7 +31,7 @@ class BundleItem(QGraphicsPathItem):
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
         
-        self.pen_normal = QPen(QColor(0, 120, 215), 3)  # Blue
+        self.pen_normal = QPen(QColor(0, 150, 215), 2, Qt.DashLine)
         self.pen_highlight = QPen(QColor(255, 215, 0), 4)  # Gold
         self.pen_selected = QPen(QColor(255, 0, 0), 4)  # Red for selected
         self.pen_connected = QPen(QColor(0, 200, 0), 3)  # Green when wires assigned
@@ -43,7 +41,7 @@ class BundleItem(QGraphicsPathItem):
         
         # Length label - ALWAYS VISIBLE now
         self.length_label = BundleLengthLabel(self)
-        # print(self.start_point , self.end_point)
+
         self.length_label.setPos((self.start_point + self.end_point) / 2)
         self.length_label.setVisible(True)  # Always visible
         
@@ -61,7 +59,7 @@ class BundleItem(QGraphicsPathItem):
         # State
         self.state = self.NORMAL
         self._is_hovered = False
-        
+        self.tree_item = None
         self.update_path()
     
     def update_path(self):
@@ -116,8 +114,78 @@ class BundleItem(QGraphicsPathItem):
             self.wire_ids.append(wire_id)
             self.wire_count = len(self.wire_ids)
             self.update_appearance()
+            
+            # Update tree item if exists
+            if hasattr(self, 'tree_item') and self.tree_item:
+                # Update wire count in tree display
+                display_text = self.tree_item.text(0)
+                # Update color based on wire count
+                if self.wire_count > 0:
+                    self.tree_item.setForeground(0, Qt.darkGreen)
+                else:
+                    self.tree_item.setForeground(0, Qt.black)
+    def remove_wire(self, wire_id: str):
+        """Remove a wire from this bundle"""
+        if wire_id in self.wire_ids:
+            self.wire_ids.remove(wire_id)
+            self.wire_count = len(self.wire_ids)
+            self.update_appearance()
+            
+            # Update tree item
+            if hasattr(self, 'tree_item') and self.tree_item:
+                if self.wire_count > 0:
+                    self.tree_item.setForeground(0, Qt.darkGreen)
+                else:
+                    self.tree_item.setForeground(0, Qt.black)
     
+    def get_wire_ids(self) -> List[str]:
+        """Get list of wire IDs in this bundle"""
+        return self.wire_ids.copy()
+
+    def assign_wires(self, wire_ids: List[str]):
+        """Assign multiple wires to this bundle at once"""
+        for wire_id in wire_ids:
+            if wire_id not in self.wire_ids:
+                self.wire_ids.append(wire_id)
+        
+        self.wire_count = len(self.wire_ids)
+        self.update_appearance()
+        
+        # Update tree item
+        if hasattr(self, 'tree_item') and self.tree_item:
+            if self.wire_count > 0:
+                self.tree_item.setForeground(0, Qt.darkGreen)
+            else:
+                self.tree_item.setForeground(0, Qt.black)
+
     def update_appearance(self):
+        
+        """Update visual appearance based on wire count"""
+        if self.wire_count == 0:
+            # No wires - dashed gray
+            pen = QPen(QColor(0, 150, 215), 2, Qt.DashLine)
+            self.pen_normal = (pen)
+        elif self.wire_count < 5:
+            # Few wires - thin blue
+            pen = QPen(QColor(0, 120, 215), 3)
+            self.pen_normal = (pen)
+        elif self.wire_count < 15:
+            # Medium bundle - thicker blue
+            pen = QPen(QColor(0, 100, 200), 4)
+            self.pen_normal = (pen)
+        else:
+            # Large bundle - thick dark blue
+            thickness = min(5 + (self.wire_count // 10), 8)
+            pen = QPen(QColor(0, 80, 160), thickness)
+            self.pen_normal = (pen)
+        
+        # Update length label to show wire count
+        if hasattr(self, 'length_label'):
+            if self.specified_length is not None:
+                self.length_label.setPlainText(f"{self.specified_length:.0f} mm* ({self.wire_count})")
+            else:
+                self.length_label.setPlainText(f"{self.length:.0f} units ({self.wire_count})")
+
         """Update visual appearance based on state"""
         if self.state == self.SELECTED:
             self.setPen(self.pen_selected)
@@ -127,7 +195,6 @@ class BundleItem(QGraphicsPathItem):
             self.setPen(self.pen_connected)
         else:
             self.setPen(self.pen_normal)
-    
     def hoverEnterEvent(self, event):
         self._is_hovered = True
         self.state = self.HIGHLIGHTED

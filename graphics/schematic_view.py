@@ -20,7 +20,7 @@ class SchematicView(QGraphicsView):
         super().__init__(scene)
         self.parent = parent
         self.setRenderHint(QPainter.Antialiasing)
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self._scene = scene
@@ -41,6 +41,23 @@ class SchematicView(QGraphicsView):
         # Initialize the Overlay Label
         self.setup_ui_overlay()
         self.create_actions()
+        self.bundle_select_mode = False
+        self.panning = False
+        self.last_pan_point = None
+    def keyPressEvent(self, event):
+        """Handle key press events"""
+        if event.key() == Qt.Key_Delete or event.key() == Qt.Key_Backspace:
+            # Delete selected bundles
+            selected = self.scene().selectedItems()
+            bundles = [item for item in selected if hasattr(item, 'bundle_id')]
+            
+            if bundles and hasattr(self.parent, 'delete_selected_bundles'):
+                self.parent.delete_selected_bundles()
+                event.accept()
+                return
+        
+        super().keyPressEvent(event)
+
     def resizeEvent(self, event):
         # Reposition the label when the window is resized
         super().resizeEvent(event)
@@ -103,21 +120,29 @@ class SchematicView(QGraphicsView):
     def set_tool(self, tool):
         self.current_tool = tool
         self.tool_label.setText(str(tool.name))
-    def mousePressEvent(self, event):
-        item = self.itemAt(event.pos())
-        if isinstance(item, PinItem):
-            self.active_pin = item
-            print("pin selected")
-        super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        item = self.itemAt(event.pos())
-        if isinstance(item, PinItem) and self.active_pin:
-            wire = WireItem("W_NEW", self.active_pin, item)
-            self.scene().addItem(wire)
-            self.netlist.connect(self.active_pin, item)
+        """Handle mouse release for panning"""
+        if event.button() == Qt.MiddleButton:
+            # Stop panning
+            self.panning = False
+            self.setCursor(Qt.ArrowCursor)
+            event.accept()
+            return
+        
+        # Handle wire creation on release
+        if event.button() == Qt.LeftButton and self.active_pin:
+            pos = self.mapToScene(event.pos())
+            item = self.scene().itemAt(pos, self.transform())
+            if isinstance(item, PinItem) and self.active_pin != item:
+                # Create wire between pins
+                wire = WireItem("W_NEW", self.active_pin, item)
+                self.scene().addItem(wire)
+                # self.netlist.connect(self.active_pin, item)  # Uncomment if netlist exists
             self.active_pin = None
+        
         super().mouseReleaseEvent(event)
+
     def create_actions(self):
         self.act_select = QAction("Select", self, checkable=True)
         self.act_add_connector = QAction("Add Connector", self, checkable=True)
@@ -139,29 +164,67 @@ class SchematicView(QGraphicsView):
 
         self.act_select.setChecked(True)
     def mousePressEvent(self, event):
+        """Handle mouse press for panning and other tools"""
+        if event.button() == Qt.MiddleButton:
+            # Start panning
+            self.panning = True
+            self.last_pan_point = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        
+        # Handle left button for tools
         pos = self.mapToScene(event.pos())
-
-        if self.current_tool == Tool.ADD_CONNECTOR:
-            c = ConnectorItem( pos.x(), pos.y(), pins=[1,2])
-            c.set_topology_manager(self.parent.topology_manager)
-            c.set_main_window(self.parent)
-            c.create_topology_node()
-            item = QTreeWidgetItem([c.cid])
-            item.setData(0, Qt.UserRole, c)
-
-            self.parent.connectors_tree.addTopLevelItem(item)
-            c.tree_item = item
+        
+        if event.button() == Qt.LeftButton:
+            if self.current_tool == Tool.ADD_CONNECTOR:
+                # Add connector
+                c = ConnectorItem(pos.x(), pos.y(), pins=[1, 2])
+                c.set_topology_manager(self.parent.topology_manager)
+                c.set_main_window(self.parent)
+                c.create_topology_node()
+                
+                # Add to tree
+                item = QTreeWidgetItem([c.cid])
+                item.setData(0, Qt.UserRole, c)
+                self.parent.connectors_tree.addTopLevelItem(item)
+                c.tree_item = item
+                
+                # Add with undo
+                self.parent.add_connector_with_undo(c, pos)
+                self.scene().addItem(c)
+                event.accept()
+                return
             
-            self.parent.add_connector_with_undo(c,pos)
-            self.scene().addItem(c)
+            elif self.current_tool == Tool.ADD_WIRE:
+                # Check if clicking on a pin
+                item = self.scene().itemAt(pos, self.transform())
+                if isinstance(item, PinItem):
+                    self.active_pin = item
+                    print("pin selected")
+        
+        # Pass other events to parent
+        super().mousePressEvent(event)
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for panning"""
+        if self.panning:
+            # Pan the view
+            delta = event.pos() - self.last_pan_point
+            self.last_pan_point = event.pos()
+            
+            # Scroll by the delta
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta.x()
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - delta.y()
+            )
+            event.accept()
+            return
+        
+        # Pass other move events to parent
+        super().mouseMoveEvent(event)
 
-        elif self.current_tool == Tool.ADD_WIRE:
-            item = self.scene().itemAt(pos, self.transform())
-            if isinstance(item, PinItem):
-                self.handle_wire_drawing(item)
-
-        else:
-            super().mousePressEvent(event)
     def set_grid_visible(self, visible: bool):
         """Set grid visibility"""
         self._show_grid = visible

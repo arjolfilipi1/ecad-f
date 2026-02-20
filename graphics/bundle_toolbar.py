@@ -13,7 +13,13 @@ class BundleToolbar(QToolBar):
         self.setMovable(True)
         
         self.setup_ui()
-    
+    def route_wires_through_bundles(self):
+        """Route wires through drawn bundles"""
+        from utils.bundle_router import BundleRouter
+        
+        router = BundleRouter(self.main_window)
+        router.route_wires_through_bundles()
+
     def setup_ui(self):
         """Setup toolbar UI"""
         
@@ -25,7 +31,14 @@ class BundleToolbar(QToolBar):
         self.addAction(self.draw_action)
         
         self.addSeparator()
+         # ROUTE WIRES BUTTON - ADD THIS
+        self.route_bundles_action = QAction("🔄 Route Wires", self)
+        self.route_bundles_action.setToolTip("Route all imported wires through drawn bundles")
+        self.route_bundles_action.triggered.connect(self.route_wires_through_bundles)
+        self.addAction(self.route_bundles_action)
         
+        self.addSeparator()
+
         # Snap options
         self.addWidget(QLabel("Snap:"))
         

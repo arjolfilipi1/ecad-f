@@ -11,6 +11,7 @@ class AddConnectorCommand(BaseCommand):
         self.connector = connector_item
         self.pos = pos
         self.main_window = main_window
+        main_window.conns.append(connector_item)
         self.connector_id = connector_item.cid
         self.pin_count = len(connector_item.pins)
     
