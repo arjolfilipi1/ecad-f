@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QGraphicsItem, QGraphicsEllipseItem
+from PyQt5.QtWidgets import QGraphicsItem, QGraphicsEllipseItem,QToolBar
 from PyQt5.QtCore import Qt, QPointF, QLineF, QEvent
 from PyQt5.QtGui import QPen, QColor, QBrush, QCursor
 from graphics.bundle_item import BundleItem
@@ -8,8 +8,9 @@ from tools.floating_input import FloatingInputWindow
 import math
 from PyQt5.QtCore import QObject
 from graphics.topology_item import FastenerGraphicsItem
+
 class BundleDrawTool(QObject):
-    """Interactive tool for drawing bundle segments"""
+    """Interactive tool for drawing continuous bundle segments like a polyline"""
     
     # Snap modes
     SNAP_GRID = 1
@@ -17,7 +18,6 @@ class BundleDrawTool(QObject):
     SNAP_BRANCH = 3
     SNAP_NODE = 4
     SNAP_FASTENER = 5
-
     
     def __init__(self, view, main_window):
         super().__init__()
@@ -27,26 +27,28 @@ class BundleDrawTool(QObject):
         
         # Drawing state
         self.is_drawing = False
-        self.current_bundle = None
-        self.start_point = None
-        
-        self.start_node = None   # The topology node of the start item
+        self.current_segment_start = None
+        self.current_start_node = None
+        self.current_start_item = None
+        self.pending_segments = []  # Store segments waiting for length input
         self.temp_preview = None
         
         # Snap settings
         self.snap_enabled = True
-        self.snap_modes = [self.SNAP_CONNECTOR, self.SNAP_BRANCH, self.SNAP_NODE, self.SNAP_FASTENER, self.SNAP_GRID]
+        self.snap_modes = [self.SNAP_CONNECTOR, self.SNAP_BRANCH, self.SNAP_NODE, 
+                           self.SNAP_FASTENER, self.SNAP_GRID]
         self.snap_tolerance = 15  # pixels
         
         # Preview line for current segment
         self.preview_line = None
         
-        # Node creation - ONLY at end, never at start
+        # Node creation
         self.auto_create_nodes = True
         
         # Length input
         self.pending_length = None
         self.pending_end_pos = None
+        self.waiting_for_length = False
         
         # Floating input window
         self.input_window = None
@@ -54,9 +56,9 @@ class BundleDrawTool(QObject):
         # Store original cursor
         self.original_cursor = None
         
-        # Valid start item types
-        self.valid_start_types = (ConnectorItem, BranchPointGraphicsItem, JunctionGraphicsItem, FastenerGraphicsItem)
-
+        # Valid item types for snapping
+        self.valid_start_types = (ConnectorItem, BranchPointGraphicsItem, 
+                                   JunctionGraphicsItem, FastenerGraphicsItem)
     
     def activate(self):
         """Activate the bundle drawing tool"""
@@ -64,13 +66,18 @@ class BundleDrawTool(QObject):
         self.original_cursor = self.view.cursor()
         self.view.viewport().setCursor(Qt.CrossCursor)
         self.is_drawing = False
+        self.current_segment_start = None
+        self.current_start_node = None
+        self.current_start_item = None
+        self.pending_segments = []
+        self.waiting_for_length = False
         
         # Install event filter on the view
         self.view.viewport().installEventFilter(self)
         
         # Update tool label in SchematicView
         if hasattr(self.view, 'tool_label'):
-            self.view.tool_label.setText("DRAW BUNDLE")
+            self.view.tool_label.setText("DRAW BUNDLE (Polyline)")
             self.view.tool_label.setStyleSheet("""
                 QLabel {
                     background-color: rgba(0, 120, 215, 200);
@@ -80,6 +87,10 @@ class BundleDrawTool(QObject):
                     font-weight: bold;
                 }
             """)
+        
+        self.main_window.statusBar().showMessage(
+            "Bundle polyline mode: Click on a connector/branch point to start, click to add segments, ESC to finish", 0
+        )
     
     def deactivate(self):
         """Deactivate the bundle drawing tool"""
@@ -126,10 +137,28 @@ class BundleDrawTool(QObject):
             self.handle_mouse_move(event)
             return True
         
-        # Handle key press for Escape
+        # Handle key press
         elif event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Escape:
-                self.cancel_drawing()
+                if self.waiting_for_length:
+                    # Cancel length input but stay in drawing mode
+                    self.waiting_for_length = False
+                    self.pending_length = None
+                    self.pending_end_pos = None
+                    if self.input_window and self.input_window.isVisible():
+                        self.input_window.hide()
+                    self.main_window.statusBar().showMessage(
+                        "Length cancelled - click to continue drawing", 1000
+                    )
+                else:
+                    # Exit drawing mode completely
+                    self.cancel_drawing()
+                    self.deactivate()
+                return True
+            
+            elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                if self.waiting_for_length and self.input_window:
+                    self.input_window.on_enter()
                 return True
         
         return False
@@ -140,15 +169,20 @@ class BundleDrawTool(QObject):
         
         if event.button() == Qt.LeftButton:
             if not self.is_drawing:
-                # Try to start drawing on an existing item
+                # Start drawing on an existing item
                 self.try_start_drawing(pos)
             else:
-                # End current bundle segment - prompt for length
-                self.prompt_for_length_before_end(pos)
+                if self.waiting_for_length:
+                    # We're waiting for length input - ignore clicks
+                    return
+                
+                # Add a new segment point
+                self.add_segment_point(pos)
         
         elif event.button() == Qt.RightButton:
-            # Cancel drawing
-            self.cancel_drawing()
+            if self.is_drawing:
+                # Finish the polyline (don't create last segment)
+                self.finish_polyline()
     
     def try_start_drawing(self, pos):
         """Try to start drawing on an existing item"""
@@ -169,31 +203,30 @@ class BundleDrawTool(QObject):
             self.main_window.statusBar().showMessage(
                 "Must start on a connector, branch point, or fastener", 2000
             )
-            # Keep cursor as cross, don't enter drawing mode
     
     def start_drawing(self, pos, start_item):
-        """Start drawing a new bundle from an existing item"""
+        """Start drawing a new polyline from an existing item"""
         # Snap to the item's position
         if isinstance(start_item, ConnectorItem):
             start_pos = start_item.pos()
-            self.start_node = start_item.topology_node
+            self.current_start_node = start_item.topology_node
         elif isinstance(start_item, BranchPointGraphicsItem):
             start_pos = start_item.pos()
-            self.start_node = start_item.branch_node
+            self.current_start_node = start_item.branch_node
         elif isinstance(start_item, JunctionGraphicsItem):
             start_pos = start_item.pos()
-            self.start_node = start_item.junction_node
+            self.current_start_node = start_item.junction_node
         elif isinstance(start_item, FastenerGraphicsItem):
             start_pos = start_item.pos()
-            self.start_node = start_item.fastener_node
+            self.current_start_node = start_item.fastener_node
         else:
-            # Fallback to snapped position
             start_pos, _ = self.get_snapped_position(pos)
-            self.start_node = None
+            self.current_start_node = None
         
         self.is_drawing = True
-        self.start_point = start_pos
-        self.start_item = start_item
+        self.current_segment_start = start_pos
+        self.current_start_item = start_item
+        self.pending_segments = []
         
         # Create preview line
         self.preview_line = self.scene.addLine(
@@ -203,83 +236,75 @@ class BundleDrawTool(QObject):
         )
         
         self.main_window.statusBar().showMessage(
-            "Click end point to set bundle length (can be anywhere)", 0
+            "Click to add next point, Right-click to finish, ESC to cancel", 0
         )
     
-    def handle_mouse_move(self, event):
-        """Handle mouse move events"""
-        if not self.is_drawing:
+    def add_segment_point(self, pos):
+        """Add a new point to the polyline"""
+        # Snap end point
+        end_pos, snap_type = self.get_snapped_position(pos)
+        
+        # Don't create zero-length segments
+        if self.current_segment_start == end_pos:
             return
         
-        raw_pos = self.view.mapToScene(event.pos())
-        
-        # Apply snapping (optional, can snap to grid but not required)
-        snap_pos, snap_type = self.get_snapped_position(raw_pos)
-        
-        # Update preview
-        self.update_preview(snap_pos)
-        
-        # Show snap hint in status bar
-        if snap_type:
-            hint = self.get_snap_hint(snap_type)
-            self.main_window.statusBar().showMessage(f"Snap to: {hint}", 100)
-    
-    def prompt_for_length_before_end(self, end_pos):
-        """Show floating input to get length before ending the bundle"""
+        # Store the end position and prompt for length
         self.pending_end_pos = end_pos
+        self.waiting_for_length = True
         
+        # Show floating input for length
         if not self.input_window:
-            from tools.floating_input import FloatingInputWindow
-            self.input_window = FloatingInputWindow(self.main_window, "Enter bundle length:")
+            self.input_window = FloatingInputWindow(self.main_window, "Enter bundle length (mm):")
             self.input_window.value_entered.connect(self.on_length_entered)
             self.input_window.cancelled.connect(self.on_length_cancelled)
         
         self.input_window.show_at_cursor()
-    def on_length_entered(self, length):
-        print("on_length_entered",self.start_point)
-        if self.start_point is not None:
-            """Handle length entered from floating input"""
-            self.pending_length = length
-            self.complete_drawing(self.pending_end_pos)
-            self.start_point = self.pending_end_pos
-        else:
-            self.pending_length = None
-            self.pending_end_pos = None
-            self.main_window.statusBar().showMessage(
-                "Length cancelled - click end point again", 2000
+        
+        # Update preview to show current segment
+        if self.preview_line:
+            self.preview_line.setLine(
+                self.current_segment_start.x(), self.current_segment_start.y(),
+                end_pos.x(), end_pos.y()
             )
+    
+    def on_length_entered(self, length):
+        """Handle length entered from floating input"""
+        if self.pending_end_pos is None:
+            return
+        
+        # Create the bundle segment with specified length
+        self.create_bundle_segment(self.pending_end_pos, length)
+        
+        # Reset length input state
+        self.waiting_for_length = False
+        self.pending_length = None
+        self.pending_end_pos = None
     
     def on_length_cancelled(self):
         """Handle cancellation of length input"""
+        # Create bundle with no specified length (use calculated length)
+        if self.pending_end_pos:
+            self.create_bundle_segment(self.pending_end_pos, None)
+        
+        # Reset length input state
+        self.waiting_for_length = False
         self.pending_length = None
         self.pending_end_pos = None
-        self.main_window.statusBar().showMessage(
-            "Length cancelled - click end point again", 2000
-        )
     
-    def complete_drawing(self, end_pos):
-        """Complete the bundle drawing with the specified length"""
-        # Snap end point (optional)
-        end_pos, snap_type = self.get_snapped_position(end_pos)
-        
-        # Don't create zero-length bundles
-        if self.start_point == end_pos:
-            self.main_window.statusBar().showMessage("Zero-length bundle ignored", 2000)
-            return
-        
-        # CREATE NODE AT END if needed (auto-create enabled and not on existing item)
-        end_node = None
-        end_item = None
+    def create_bundle_segment(self, end_pos, specified_length=None):
+        """Create a bundle segment from current start to end position"""
         
         # Check if end point is on an existing item
         items = self.scene.items(end_pos)
+        end_item = None
+        end_node = None
+        
         for item in items:
             if isinstance(item, self.valid_start_types):
                 end_item = item
                 break
         
         if end_item:
-            from graphics.topology_item import BranchPointGraphicsItem
             # End on existing item - use its node
             if isinstance(end_item, ConnectorItem):
                 end_node = end_item.topology_node
@@ -289,8 +314,9 @@ class BundleDrawTool(QObject):
                 end_node = end_item.junction_node
             elif isinstance(end_item, FastenerGraphicsItem):
                 end_node = end_item.fastener_node
+            end_pos = end_item.pos()  # Use exact position
         elif self.auto_create_nodes:
-            # Create new node at end point
+            # Create new branch point at end position
             from model.topology import BranchPointNode
             from graphics.topology_item import BranchPointGraphicsItem
             
@@ -299,64 +325,104 @@ class BundleDrawTool(QObject):
             self.scene.addItem(graphics)
             self.main_window.topology_manager.nodes[node.id] = node
             end_node = node
+            end_item = graphics
         
-
-        bundle = BundleItem(self.start_point, end_pos)
+        # Create the bundle
+        bundle = BundleItem(self.current_segment_start, end_pos)
         
         # Set length if specified
-        if self.pending_length is not None:
-            bundle.set_specified_length(self.pending_length)
+        if specified_length is not None:
+            bundle.set_specified_length(specified_length)
         
         # Store node references
-        bundle.start_node = self.start_node
+        bundle.start_node = self.current_start_node
         bundle.end_node = end_node
-        bundle.start_item = self.start_item
+        bundle.start_item = self.current_start_item
         bundle.end_item = end_item
         
-        # Add to scene
-        self.scene.addItem(bundle)
-        
-        # Store in main window
-        if not hasattr(self.main_window, 'bundles'):
-            self.main_window.bundles = []
+        # Add to scene using undo command
+        from commands.bundle_commands import AddBundleCommand
+        cmd = AddBundleCommand(
+            self.scene,
+            bundle,
+            self.current_segment_start,
+            end_pos,
+            self.main_window
+        )
+        self.main_window.undo_manager.push(cmd)
         self.main_window.bundles.append(bundle)
+        self.main_window.scene.addItem(bundle)
+        self.main_window.refresh_bundle_tree()
         
-        # Connect to nodes if they exist
-        if self.start_node and hasattr(self.start_node, 'connected_bundles'):
-            self.start_node.connected_bundles.append(bundle)
+        # Store in pending segments for potential undo grouping
+        self.pending_segments.append(bundle)
         
-        if end_node and hasattr(end_node, 'connected_bundles'):
-            end_node.connected_bundles.append(bundle)
+        # Prepare for next segment
+        self.current_segment_start = end_pos
+        self.current_start_node = end_node
+        self.current_start_item = end_item
         
-        # Clear pending length
-        self.pending_length = None
-        
-        # If end was on an item, start new bundle from there
-        if end_item:
-            self.start_drawing(end_pos, end_item)
-            self.start_point = end_pos
-        else:
-            # End in empty space - stay in drawing mode but don't auto-start
-            self.is_drawing = False
-            self.start_point = None
-            self.start_item = None
-            self.start_node = None
-            
-            if self.preview_line and self.preview_line.scene():
-                self.scene.removeItem(self.preview_line)
-                self.preview_line = None
-            
-            self.main_window.statusBar().showMessage(
-                "Click on a connector, branch point, or fastener to start a new bundle", 0
-            )
-    
-    def update_preview(self, pos):
-        """Update preview line"""
-        if self.preview_line and self.start_point:
+        # Update preview line to start from new position
+        if self.preview_line:
             self.preview_line.setLine(
-                self.start_point.x(), self.start_point.y(),
-                pos.x(), pos.y()
+                end_pos.x(), end_pos.y(),
+                end_pos.x(), end_pos.y()
             )
+        
+        self.main_window.statusBar().showMessage(
+            f"Bundle segment created - click to continue, Right-click to finish", 1000
+        )
+    
+    def finish_polyline(self):
+        """Finish the polyline (don't create last segment)"""
+        if self.pending_segments:
+            # Group all segments into one undo command
+            if len(self.pending_segments) > 1:
+                from commands.base_command import CompoundCommand
+                compound = CompoundCommand(f"Draw {len(self.pending_segments)} Bundle Segments")
+                # Note: AddBundleCommand already pushed individually, but we could
+                # restructure to use compound command
+                pass
+        self.on_length_cancelled()
+        if self.input_window and self.input_window.isVisible():
+            self.input_window.hide()
+        # Clear drawing state but stay in tool mode for next polyline
+        self.is_drawing = False
+        self.current_segment_start = None
+        self.current_start_node = None
+        self.current_start_item = None
+        self.pending_segments = []
+        self.waiting_for_length = False
+        
+        if self.preview_line and self.preview_line.scene():
+            self.scene.removeItem(self.preview_line)
+            self.preview_line = None
+        
+        self.main_window.statusBar().showMessage(
+            "Polyline finished - click on a connector/branch point to start new polyline", 0
+        )
+    
+    def handle_mouse_move(self, event):
+        """Handle mouse move events"""
+        if not self.is_drawing or self.waiting_for_length:
+            return
+        
+        raw_pos = self.view.mapToScene(event.pos())
+        
+        # Apply snapping
+        snap_pos, snap_type = self.get_snapped_position(raw_pos)
+        
+        # Update preview line
+        if self.preview_line and self.current_segment_start:
+            self.preview_line.setLine(
+                self.current_segment_start.x(), self.current_segment_start.y(),
+                snap_pos.x(), snap_pos.y()
+            )
+        
+        # Show snap hint in status bar
+        if snap_type:
+            hint = self.get_snap_hint(snap_type)
+            self.main_window.statusBar().showMessage(f"Snap to: {hint}", 100)
     
     def cancel_drawing(self):
         """Cancel current drawing operation"""
@@ -365,20 +431,16 @@ class BundleDrawTool(QObject):
             self.preview_line = None
         
         self.is_drawing = False
-        self.start_point = None
-        self.start_item = None
-        self.start_node = None
+        self.current_segment_start = None
+        self.current_start_node = None
+        self.current_start_item = None
+        self.pending_segments = []
+        self.waiting_for_length = False
         self.pending_length = None
         self.pending_end_pos = None
         
         if self.input_window and self.input_window.isVisible():
             self.input_window.hide()
-        
-        self.view.setCursor(Qt.CrossCursor)
-        
-        self.main_window.statusBar().showMessage(
-            "Click on a connector, branch point, or fastener to start a bundle", 0
-        )
     
     def get_snapped_position(self, pos):
         """Get snapped position based on current snap modes"""

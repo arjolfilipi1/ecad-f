@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QUndoStack, QUndoView, QDockWidget,QAction
 from PyQt5.QtCore import Qt, pyqtSignal
 from typing import Optional
 from .base_command import BaseCommand
-
+from PyQt5 import sip
 class UndoManager:
     """Central manager for undo/redo operations"""
     
@@ -70,26 +70,29 @@ class UndoManager:
     def _update_undo_action(self, can_undo: bool):
         """Update undo action state"""
         # Find undo action in main window
-        for action in self.main_window.findChildren(QAction):
-            if action.text() == "&Undo":
-                action.setEnabled(can_undo)
-                if can_undo:
-                    action.setText(f"&Undo {self.undo_stack.undoText()}")
-                else:
-                    action.setText("&Undo")
-                break
+        if not sip.isdeleted(self.main_window):
+
+            for action in self.main_window.findChildren(QAction):
+                if action.text() == "&Undo":
+                    action.setEnabled(can_undo)
+                    if can_undo:
+                        action.setText(f"&Undo {self.undo_stack.undoText()}")
+                    else:
+                        action.setText("&Undo")
+                    break
     
     def _update_redo_action(self, can_redo: bool):
         """Update redo action state"""
-        for action in self.main_window.findChildren(QAction):
-            if action.text().startswith("&Redo"):
-                action.setEnabled(can_redo)
-                if can_redo:
-                    action.setText(f"&Redo {self.undo_stack.redoText()}")
-                else:
-                    action.setText("&Redo")
-                break
-    
+        if not sip.isdeleted(self.main_window):
+            for action in self.main_window.findChildren(QAction):
+                if action.text().startswith("&Redo"):
+                    action.setEnabled(can_redo)
+                    if can_redo:
+                        action.setText(f"&Redo {self.undo_stack.redoText()}")
+                    else:
+                        action.setText("&Redo")
+                    break
+        
     def _update_save_state(self, clean: bool):
         """Update window title to show unsaved changes"""
         title = self.main_window.windowTitle()

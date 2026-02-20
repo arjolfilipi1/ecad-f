@@ -23,7 +23,6 @@ class BranchPointNode(TopologyNode):
         self.type = "branch_point"
         self.branch_type = bp_type  # "split", "merge", "splice"
         self.splice_info = None  # For splice details
-
 class WireSegment:
     """A segment of wire between two topology nodes"""
     def __init__(self, segment_id: str = None, 

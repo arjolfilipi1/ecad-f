@@ -250,10 +250,17 @@ class VisualizationManager:
     def _apply_item_visibility(self, item):
         """Determine and apply visibility for a single item"""
         
-        # 1. BUNDLE SEGMENTS
+        # 1. BUNDLE ITEMS (new)
+        if hasattr(item, 'bundle_id'):
+            # Bundles are shown based on bundle visibility setting
+            item.setVisible(self.show_bundles)
+            return
+        
+        # 2. BUNDLE SEGMENTS (existing)
         if isinstance(item, SegmentGraphicsItem):
             item.setVisible(self.show_bundles)
             return
+
         
         # 2. ROUTED WIRES (through topology)
         if isinstance(item, SegmentedWireItem):
