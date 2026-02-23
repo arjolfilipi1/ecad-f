@@ -6,6 +6,7 @@ from .pin_item import PinItem
 from itertools import count
 from typing import Union, List,Optional
 from PyQt5 import sip
+
 class ConnectorItem(QGraphicsRectItem):
     _ids = count(0)
     
@@ -67,6 +68,7 @@ class ConnectorItem(QGraphicsRectItem):
         self.shadow.setColor(QColor(250, 250, 250, 160)) # Shadow color with transparency
         self.setGraphicsEffect(self.shadow)
         self.shadow.setEnabled(True)
+        
     def _create_pins(self, pins_spec: Union[int, List[str]]):
         """Create pin items from specification"""
         self.pins.clear()
@@ -109,6 +111,7 @@ class ConnectorItem(QGraphicsRectItem):
     def set_main_window(self, window):
         """Set reference to main window for topology access"""
         self.main_window = window
+        
     def create_topology_node(self):
         """Create topology node for this connector"""
         if self.topology_manager:

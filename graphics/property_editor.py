@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit, 
                              QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
                              QGroupBox, QPushButton, QLabel, QScrollArea,
-                             QTabWidget, QTextEdit,QHBoxLayout,QTableWidget,QHeaderView)
+                             QTabWidget, QTextEdit,QHBoxLayout,QTableWidget,QHeaderView,QTableWidgetItem)
 from PyQt5.QtCore import Qt, pyqtSignal,QPointF
 from PyQt5.QtGui import QColor,QPainter
 from model.models import Connector, Wire, Pin, CombinedWireColor
@@ -68,7 +68,8 @@ class PropertyEditor(QWidget):
         elif hasattr(item, 'bundle_id'):  # BundleItem
             self.current_type = 'bundle'
             self.create_bundle_editor(item)
-
+        else:
+            self.create_random_editor(item)
     
     def clear_content(self):
         """Clear all property widgets"""
@@ -87,7 +88,13 @@ class PropertyEditor(QWidget):
         row_layout.addRow(label, widget)
         self.content_layout.addWidget(row)
         return widget
-    
+    def create_random_editor(self, item):
+        """Create editor for other items"""
+        # Header
+        header = QLabel(f"Type: {type(item)}")
+        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
+        self.content_layout.addWidget(header)
+        self.content_layout.addStretch()
     def create_connector_editor(self, connector_item):
         """Create editor for connector properties"""
         
@@ -376,7 +383,7 @@ class PropertyEditor(QWidget):
     
     def create_segment_editor(self, segment_item):
         """Create editor for segment properties"""
-        header = QLabel(f"Segment: {segment_item.segment.id}")
+        header = QLabel(f"{type(segment_item)}|Segment: {segment_item.segment.id}")
         header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
         self.content_layout.addWidget(header)
         

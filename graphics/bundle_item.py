@@ -3,6 +3,7 @@ from PyQt5.QtGui import QPainterPath, QPen, QColor, QFont, QPainter
 from PyQt5.QtCore import Qt, QPointF, QLineF
 import math
 from typing import List
+
 class BundleItem(QGraphicsPathItem):
     """Interactive bundle segment that can be drawn manually"""
     
@@ -12,7 +13,7 @@ class BundleItem(QGraphicsPathItem):
     SELECTED = 2
     CONNECTED = 3
     
-    def __init__(self, start_point, end_point: QPointF = None, bundle_id=None):
+    def __init__(self, start_point, end_point: QPointF = None, bundle_id=None,topology_segment=None,broken = False):
         super().__init__()
         
         self.bundle_id = bundle_id or f"B{id(self)}"
@@ -24,7 +25,15 @@ class BundleItem(QGraphicsPathItem):
         self.specified_length = None  # User-specified length override
         self.wire_count = 0
         self.wire_ids = []  # Wires assigned to this bundle
-        
+        self.broken = broken
+        # Topology integration - if a segment is provided, link to it
+        self.topology_segment = topology_segment
+        if topology_segment:
+            topology_segment.graphics_item = self
+            self.wires = topology_segment.wires  # Reference to wires in segment
+            self.wire_count = len(topology_segment.wires)
+            self.wire_ids = [w.id for w in topology_segment.wires]
+
         # Visual properties
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)  # Not directly movable
@@ -44,6 +53,7 @@ class BundleItem(QGraphicsPathItem):
 
         self.length_label.setPos((self.start_point + self.end_point) / 2)
         self.length_label.setVisible(True)  # Always visible
+        self.length_label.setRotation(math.degrees(math.atan2(end_point.y()-start_point.y(), end_point.x()-start_point.x())))
         
         # Add workspace units indicator
         self.workspace_label = QGraphicsTextItem("(workspace units)", self)
@@ -78,7 +88,7 @@ class BundleItem(QGraphicsPathItem):
                 # Add slight curve for long bundles
                 ctrl_x = (self.start_point.x() + self.end_point.x()) / 2
                 ctrl_y = (self.start_point.y() + self.end_point.y()) / 2
-                path.quadTo(ctrl_x + dy*0.1, ctrl_y - dx*0.1, 
+                path.quadTo(ctrl_x + dy*0.05, ctrl_y - dx*0.05, 
                            self.end_point.x(), self.end_point.y())
             else:
                 path.lineTo(self.end_point)
@@ -102,6 +112,10 @@ class BundleItem(QGraphicsPathItem):
         """Set end point and update path"""
         self.end_point = point
         self.update_path()
+        if self.topology_segment:
+            # Update topology if linked
+            pass
+
     
     def set_specified_length(self, length: float):
         """Set user-specified length override"""
@@ -124,6 +138,7 @@ class BundleItem(QGraphicsPathItem):
                     self.tree_item.setForeground(0, Qt.darkGreen)
                 else:
                     self.tree_item.setForeground(0, Qt.black)
+                    
     def remove_wire(self, wire_id: str):
         """Remove a wire from this bundle"""
         if wire_id in self.wire_ids:
@@ -159,25 +174,16 @@ class BundleItem(QGraphicsPathItem):
                 self.tree_item.setForeground(0, Qt.black)
 
     def update_appearance(self):
-        
-        """Update visual appearance based on wire count"""
-        if self.wire_count == 0:
-            # No wires - dashed gray
-            pen = QPen(QColor(0, 150, 215), 2, Qt.DashLine)
-            self.pen_normal = (pen)
-        elif self.wire_count < 5:
-            # Few wires - thin blue
-            pen = QPen(QColor(0, 120, 215), 3)
-            self.pen_normal = (pen)
-        elif self.wire_count < 15:
-            # Medium bundle - thicker blue
-            pen = QPen(QColor(0, 100, 200), 4)
-            self.pen_normal = (pen)
+        """Update visual appearance based on state"""
+        if self.state == self.SELECTED:
+            self.setPen(self.pen_selected)
+        elif self.state == self.HIGHLIGHTED:
+            self.setPen(self.pen_highlight)
+        elif self.wire_count > 0:
+            self.setPen(self.pen_connected)
         else:
-            # Large bundle - thick dark blue
-            thickness = min(5 + (self.wire_count // 10), 8)
-            pen = QPen(QColor(0, 80, 160), thickness)
-            self.pen_normal = (pen)
+            self.setPen(self.pen_normal)
+
         
         # Update length label to show wire count
         if hasattr(self, 'length_label'):
@@ -259,6 +265,18 @@ class BundleItem(QGraphicsPathItem):
         
         painter.drawPath(arrow_path)
         painter.restore()
+    def cleanup(self):
+        """Clean up references"""
+        if self.tree_item:
+            try:
+                tree = self.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    index = tree.indexOfTopLevelItem(self.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except:
+                pass
+            self.tree_item = None
 
 
 class BundleLengthLabel(QGraphicsTextItem):
@@ -269,7 +287,6 @@ class BundleLengthLabel(QGraphicsTextItem):
         self.setFlag(QGraphicsItem.ItemIgnoresTransformations)
         self.setDefaultTextColor(Qt.white)
         self.setFont(QFont("Arial", 8, QFont.Bold))
-        # Always visible, so no hide/show logic
     
     def paint(self, painter, option, widget=None):
         """Draw with background"""
@@ -289,3 +306,4 @@ class BundleLengthLabel(QGraphicsTextItem):
         painter.drawText(rect, Qt.AlignCenter, self.toPlainText())
         
         painter.restore()
+

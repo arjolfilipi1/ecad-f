@@ -6,6 +6,7 @@ from graphics.pin_item import PinItem
 from graphics.connection_point import ConnectionPoint
 from PyQt5.QtCore import QPointF
 import uuid
+from graphics.bundle_item import BundleItem
 
 class TopologyManager:
     def __init__(self):
@@ -51,7 +52,20 @@ class TopologyManager:
         segment = WireSegment(segment_id, start_node, end_node)
         self.segments[segment.id] = segment
         return segment
-    
+    def create_bundle_from_segment(self, segment: WireSegment) -> BundleItem:
+        """Create a graphics bundle from a topology segment"""
+        from graphics.bundle_item import BundleItem
+        start_pos = QPointF(segment.start_node.position[0], segment.start_node.position[1])
+        end_pos = QPointF(segment.end_node.position[0], segment.end_node.position[1])
+        
+        bundle = BundleItem(start_pos, end_pos, topology_segment=segment)
+        bundle.start_node = segment.start_node
+        bundle.end_node = segment.end_node
+        bundle.auto_created = True
+        
+        self.bundles[bundle.bundle_id] = bundle
+        return bundle
+
     def find_path(self, start_node: TopologyNode, end_node: TopologyNode) -> List[WireSegment]:
         """Find shortest path between two nodes using BFS"""
         if start_node == end_node:

@@ -81,8 +81,7 @@ class BundleRouter:
                 main_window = self.main_window,
                 original_wires = wires,
                 routed_wires = routed_wires,
-                branch_points = [],
-                segments = created_segments,
+                created_segments = created_segments,
                 bundles =bundles
             )
             self.main_window.undo_manager.push(cmd)

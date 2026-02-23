@@ -6,7 +6,7 @@ from graphics.wire_item import SegmentedWireItem, WireItem
 from graphics.topology_item import (
     JunctionGraphicsItem, BranchPointGraphicsItem
 )
-from graphics.segment_item import SegmentGraphicsItem
+
 from graphics.connector_item import ConnectorItem
 
 class VisualizationMode(Enum):
@@ -15,7 +15,6 @@ class VisualizationMode(Enum):
     BUNDLES_ONLY = auto()     # Show only bundle segments
     ROUTED_WIRES_ONLY = auto() # Show only routed wires (no bundles)
     DIRECT_WIRES_ONLY = auto() # Show only original direct wires (no topology)
-    MANUFACTURING = auto()    # Show formboard style with dimensions
     DEBUG = auto()           # Show all including connection points
 
 
@@ -210,13 +209,7 @@ class VisualizationManager:
             self.show_junctions = False
             self.show_direct_wires = True
             
-        elif mode == VisualizationMode.MANUFACTURING:
-            self.show_bundles = True
-            self.show_routed_wires = False
-            self.show_branch_points = True
-            self.show_junctions = True
-            self.show_direct_wires = False
-            self._apply_manufacturing_style()
+
         
         # Update action states
         self._update_action_states()
@@ -250,60 +243,46 @@ class VisualizationManager:
     def _apply_item_visibility(self, item):
         """Determine and apply visibility for a single item"""
         
-        # 1. BUNDLE ITEMS (new)
+        # 1. BUNDLE ITEMS - show these
         if hasattr(item, 'bundle_id'):
-            # Bundles are shown based on bundle visibility setting
             item.setVisible(self.show_bundles)
             return
         
-        # 2. BUNDLE SEGMENTS (existing)
-        if isinstance(item, SegmentGraphicsItem):
-            item.setVisible(self.show_bundles)
-            return
-
+        # 2. SEGMENT GRAPHICS ITEMS - NO LONGER USED
+        # This case is removed
         
-        # 2. ROUTED WIRES (through topology)
+        # 3. ROUTED WIRES (through topology)
         if isinstance(item, SegmentedWireItem):
             item.setVisible(self.show_routed_wires)
             return
         
-        # 3. DIRECT WIRES (original import)
+        # 4. DIRECT WIRES (original import)
         if isinstance(item, WireItem):
             item.setVisible(self.show_direct_wires)
             return
         
-        # 4. BRANCH POINTS
+        # 5. BRANCH POINTS
         if isinstance(item, BranchPointGraphicsItem):
             item.setVisible(self.show_branch_points)
             return
         
-        # 5. JUNCTIONS
+        # 6. JUNCTIONS
         if isinstance(item, JunctionGraphicsItem):
             item.setVisible(self.show_junctions)
             return
         
-        # 6. CONNECTOR LABELS (info panels)
+        # 7. CONNECTOR LABELS
         if hasattr(item, 'connector') and hasattr(item, 'setVisible'):
-            # This is ConnectorInfoItem
             item.setVisible(self.show_connector_labels)
             return
         
-        # 7. DEBUG ITEMS
+        # 8. DEBUG ITEMS
         if hasattr(item, 'debug_item') or hasattr(item, 'is_debug_item'):
             item.setVisible(self.show_debug)
+
     
     # ============ SPECIALIZED VIEWS ============
-    
-    def _apply_manufacturing_style(self):
-        """Apply manufacturing formboard style"""
-        # Make bundles thicker, add dimensions
-        for item in self.scene.items():
-            if isinstance(item, SegmentGraphicsItem):
-                # Make segments thicker and add measurement lines
-                pen = item.pen()
-                pen.setWidth(pen.width() + 2)
-                pen.setColor(Qt.darkBlue)
-                item.setPen(pen)
+
     
     def show_direct_wires_mode(self):
         """Convenience method to show only direct wires"""
@@ -341,18 +320,7 @@ class VisualizationManager:
                     if hasattr(cp, 'setVisible'):
                         cp.setVisible(True)
         
-        # Show wire counts on segments
-        for item in self.scene.items():
-            if isinstance(item, SegmentGraphicsItem):
-                wire_count = len(item.segment.wires)
-                if wire_count > 0 and not hasattr(item, '_debug_label'):
-                    from PyQt5.QtWidgets import QGraphicsTextItem
-                    label = QGraphicsTextItem(f"{wire_count}", item)
-                    label.setPos(10, -15)
-                    label.setScale(0.8)
-                    label.setDefaultTextColor(Qt.red)
-                    label.debug_item = True
-                    item._debug_label = label
+        
     
     def _hide_debug_info(self):
         """Hide debug visualization elements"""

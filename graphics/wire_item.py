@@ -233,15 +233,15 @@ class SegmentedWireItem(QGraphicsPathItem):
                 # Determine direction
                 if i == 0 and self.wire.from_pin:
                     # First segment: connect from pin to first node
-                    self._add_connection_path(path, start_pos, p1)
+                    path.lineTo(p1)
                 
                 # Add the segment path
-                self._add_segment_path(path, p1, p2)
+                path.lineTo(p2)
                 
                 # If last segment, connect to to_pin
                 if i == len(self.wire.segments) - 1 and self.wire.to_pin:
                     end_pos = self.wire.to_pin.scene_position()
-                    self._add_connection_path(path, p2, end_pos)
+                    path.lineTo(end_pos)
         
         self.setPath(path)
         
@@ -250,25 +250,8 @@ class SegmentedWireItem(QGraphicsPathItem):
         self.setPen(pen)
     
     def _add_segment_path(self, path, p1, p2):
-        """Add a segment path with orthogonal routing"""
-        dx = p2.x() - p1.x()
-        dy = p2.y() - p1.y()
-        
-        if abs(dx) > 20 or abs(dy) > 20:
-            # Orthogonal routing
-            if abs(dx) > abs(dy):
-                mid_x = (p1.x() + p2.x()) / 2
-                path.lineTo(mid_x, p1.y())
-                path.lineTo(mid_x, p2.y())
-                path.lineTo(p2)
-            else:
-                mid_y = (p1.y() + p2.y()) / 2
-                path.lineTo(p1.x(), mid_y)
-                path.lineTo(p2.x(), mid_y)
-                path.lineTo(p2)
-        else:
-            # Direct line for short distances
-            path.lineTo(p2)
+  
+        path.lineTo(p2)
     
     def _add_connection_path(self, path, from_point, to_point):
         """Add connection from pin to node"""
@@ -284,19 +267,7 @@ class SegmentedWireItem(QGraphicsPathItem):
         
         path = QPainterPath(p1)
         
-        dx = p2.x() - p1.x()
-        dy = p2.y() - p1.y()
         
-        if abs(dx) > abs(dy):
-            mid_x = p1.x() + dx * 0.5
-            path.lineTo(mid_x, p1.y())
-            path.lineTo(mid_x, p2.y())
-            path.lineTo(p2)
-        else:
-            mid_y = p1.y() + dy * 0.5
-            path.lineTo(p1.x(), mid_y)
-            path.lineTo(p2.x(), mid_y)
-            path.lineTo(p2)
         
         self.setPath(path)
     

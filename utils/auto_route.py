@@ -10,7 +10,7 @@ class HarnessAutoRouter:
     def __init__(self, topology_manager, main_window):
         self.topology_manager = topology_manager
         self.main_window = main_window
-        self.segments = []
+        self.bundles = []
         self.branch_points = []
         
     def route_from_imported_data(self):
@@ -79,7 +79,7 @@ class HarnessAutoRouter:
             self.main_window,
             wire_items,
             self.branch_points,
-            self.segments
+            segments
         )
         self.main_window.undo_manager.push(cmd)
         
@@ -133,7 +133,7 @@ class HarnessAutoRouter:
         return groups
     
     def _create_topology_from_groups(self, wire_groups):
-        """Create branch points and segments - NO WIRE DELETION"""
+        """Create branch points and bundles - USING BUNDLEITEM"""
         
         # Create branch points for central connectors
         central_bps = {}
@@ -159,20 +159,23 @@ class HarnessAutoRouter:
             self.main_window.scene.addItem(bp_graphics)
             self.branch_points.append(bp_graphics)
             
-            # Create segment from connector to branch point
+            # Create segment in topology manager
             seg = self.topology_manager.create_segment(
                 central_conn.topology_node,
                 bp
             )
-            from graphics.segment_item import SegmentGraphicsItem
-            seg_graphics = SegmentGraphicsItem(seg, self.topology_manager)
-            self.main_window.scene.addItem(seg_graphics)
-            self.segments.append(seg_graphics)
             
-            central_bps[central_id] = (bp, seg)
+            # Create BUNDLE from the segment
+            from graphics.bundle_item import BundleItem
+            bundle = self.topology_manager.create_bundle_from_segment(seg)
+            self.main_window.scene.addItem(bundle)
+            self.main_window.bundles.append(bundle)
+            self.bundles.append(bundle)  # Store for undo
+            
+            central_bps[central_id] = (bp, bundle)
         
         # Create segments from branch points to other connectors
-        for central_id, (bp_node, trunk_seg) in central_bps.items():
+        for central_id, (bp_node, trunk_bundle) in central_bps.items():
             central_conn = None
             for conn in self.main_window.conns:
                 if conn.cid == central_id:
@@ -190,53 +193,60 @@ class HarnessAutoRouter:
                 if wire.end_pin.parent != central_conn:
                     connected_connectors.add(wire.end_pin.parent)
             
-            # Create segments to each connected connector
+            # Create bundles to each connected connector
             for other_conn in connected_connectors:
-                existing = self._find_segment(bp_node, other_conn.topology_node)
+                existing = self._find_bundle(bp_node, other_conn.topology_node)
                 if not existing:
+                    # Create segment
                     seg = self.topology_manager.create_segment(
                         bp_node,
                         other_conn.topology_node
                     )
-                    seg_graphics = SegmentGraphicsItem(seg, self.topology_manager)
-                    self.main_window.scene.addItem(seg_graphics)
-                    self.segments.append(seg_graphics)
+                    # Create bundle
+                    bundle = self.topology_manager.create_bundle_from_segment(seg)
+                    self.main_window.scene.addItem(bundle)
+                    self.main_window.bundles.append(bundle)
+                    self.bundles.append(bundle)
         
         # Handle direct connections (no branch point)
         for wire in wire_groups['direct']:
-            self._create_direct_segment(wire)
+            self._create_direct_bundle(wire)
+
     
-    def _create_direct_segment(self, wire_item):
-        """Create direct segment between two connectors"""
+    def _create_direct_bundle(self, wire_item):
+        """Create direct bundle between two connectors"""
         from_node = wire_item.start_pin.parent.topology_node
         to_node = wire_item.end_pin.parent.topology_node
         
-        # Check if segment already exists
-        existing = self._find_segment(from_node, to_node)
+        # Check if bundle already exists
+        existing = self._find_bundle(from_node, to_node)
         if existing:
             return existing
         
+        # Create segment
         segment = self.topology_manager.create_segment(from_node, to_node)
-        from graphics.segment_item import SegmentGraphicsItem
-        seg_graphics = SegmentGraphicsItem(segment, self.topology_manager)
-        self.main_window.scene.addItem(seg_graphics)
-        self.segments.append(seg_graphics)
         
-        return segment
+        # Create bundle
+        bundle = self.topology_manager.create_bundle_from_segment(segment)
+        self.main_window.scene.addItem(bundle)
+        self.main_window.bundles.append(bundle)
+        self.bundles.append(bundle)
+        
+        return bundle
+
     
-    def _find_segment(self, node1, node2):
-        """Find existing segment between two nodes"""
-        for seg in self.topology_manager.segments.values():
-            if (seg.start_node == node1 and seg.end_node == node2) or \
-               (seg.start_node == node2 and seg.end_node == node1):
-                return seg
+    def _find_bundle(self, node1, node2):
+        """Find existing bundle between two nodes"""
+        for bundle in self.main_window.bundles:
+            if (bundle.start_node == node1 and bundle.end_node == node2) or \
+               (bundle.start_node == node2 and bundle.end_node == node1):
+                return bundle
         return None
+
     
     def _add_segmented_visualization(self, wire_items):
-        """
-        ADD segmented wire visualization on top of existing topology
-        Does NOT delete original wires
-        """
+        """ADD segmented wire visualization - unchanged"""
+        # This method stays the same
         from graphics.wire_item import SegmentedWireItem
         
         # Group wires that share the same path
@@ -308,13 +318,14 @@ class HarnessAutoRouter:
                 if not hasattr(original_wire, 'routed_visualization'):
                     original_wire.routed_visualization = []
                 original_wire.routed_visualization.append(wire_graphics)
+
     
     def clear_topology(self):
         """Remove topology elements but KEEP original wires"""
-        # Remove segment graphics
-        for item in self.segments:
-            if item.scene():
-                self.main_window.scene.removeItem(item)
+        # Remove bundle graphics
+        for bundle in self.bundles:
+            if bundle.scene():
+                self.main_window.scene.removeItem(bundle)
         
         # Remove branch point graphics
         for item in self.branch_points:
@@ -330,16 +341,18 @@ class HarnessAutoRouter:
         
         # Clear topology data but KEEP connector nodes
         self.topology_manager.segments.clear()
+        self.topology_manager.bundles.clear()
         self.topology_manager.nodes = {
             k: v for k, v in self.topology_manager.nodes.items()
             if hasattr(v, 'node_type') and v.node_type == "connector"
         }
         self.topology_manager.wires.clear()
         
-        self.segments.clear()
+        self.bundles.clear()
         self.branch_points.clear()
         
         print("Topology cleared - original wires preserved")
+
 
 
 class ManualRouter:
@@ -360,26 +373,7 @@ class ManualRouter:
         self.main_window.scene.addItem(bp_graphics)
         return bp_graphics
     
-    def create_segment_between_selected(self):
-        """Create segment between two selected nodes"""
-        selected = self.main_window.scene.selectedItems()
-        nodes = []
-        
-        for item in selected:
-            if hasattr(item, 'topology_node'):
-                nodes.append(item.topology_node)
-            elif hasattr(item, 'branch_node'):
-                nodes.append(item.branch_node)
-            elif hasattr(item, 'junction_node'):
-                nodes.append(item.junction_node)
-        
-        if len(nodes) == 2:
-            segment = self.topology_manager.create_segment(nodes[0], nodes[1])
-            from graphics.segment_item import SegmentGraphicsItem
-            seg_graphics = SegmentGraphicsItem(segment, self.topology_manager)
-            self.main_window.scene.addItem(seg_graphics)
-            return seg_graphics
-        return None
+    
     
     def route_selected_wires(self):
         """Route selected wires through topology"""

@@ -146,14 +146,14 @@ class UpdateWirePropertiesCommand(BaseCommand):
 
 
 class RouteWiresCommand(CompoundCommand):
-    """Convert direct wires to routed topology"""
+    """Convert direct wires to routed topology - USING BUNDLES"""
     
-    def __init__(self, main_window, wire_items, branch_points, segments):
+    def __init__(self, main_window, wire_items, branch_points, bundles):
         super().__init__("Create Branches")
         self.main_window = main_window
         self.wire_items = wire_items
         self.branch_points = branch_points
-        self.segments = segments
+        self.bundles = bundles  # Now bundles instead of segments
         self.original_wire_visibility = []
         
         # Store original wire visibility
@@ -165,11 +165,11 @@ class RouteWiresCommand(CompoundCommand):
         for wire in self.wire_items:
             wire.setVisible(False)
         
-        # Add branch points and segments to scene
+        # Add branch points and bundles to scene
         for bp in self.branch_points:
             self.main_window.scene.addItem(bp)
-        for seg in self.segments:
-            self.main_window.scene.addItem(seg)
+        for bundle in self.bundles:
+            self.main_window.scene.addItem(bundle)
         
         # Add routed wires
         if hasattr(self.main_window, 'routed_wire_items'):
@@ -181,19 +181,20 @@ class RouteWiresCommand(CompoundCommand):
             self.main_window.viz_manager.on_auto_route_complete()
         
         self.main_window.refresh_tree_views()
+        self.main_window.refresh_bundle_tree()
     
     def undo(self):
         # Show original wires
         for wire, visible in zip(self.wire_items, self.original_wire_visibility):
             wire.setVisible(visible)
         
-        # Remove branch points and segments
+        # Remove branch points and bundles
         for bp in self.branch_points:
             if bp.scene():
                 self.main_window.scene.removeItem(bp)
-        for seg in self.segments:
-            if seg.scene():
-                self.main_window.scene.removeItem(seg)
+        for bundle in self.bundles:
+            if bundle.scene():
+                self.main_window.scene.removeItem(bundle)
         
         # Remove routed wires
         if hasattr(self.main_window, 'routed_wire_items'):
@@ -206,3 +207,5 @@ class RouteWiresCommand(CompoundCommand):
             self.main_window.viz_manager.on_clear_topology()
         
         self.main_window.refresh_tree_views()
+        self.main_window.refresh_bundle_tree()
+

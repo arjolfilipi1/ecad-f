@@ -3,8 +3,8 @@ from model.topology_manager import TopologyManager
 from graphics.topology_item import (
     JunctionGraphicsItem, BranchPointGraphicsItem
 )
+from graphics.bundle_item import BundleItem
 from PyQt5 import sip
-from graphics.segment_item import SegmentGraphicsItem
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow,QGraphicsScene,QToolBar,QAction,QDialog,QVBoxLayout,QLabel,
     QDockWidget,QTreeWidget,QTabWidget,QTreeWidgetItem,QFileDialog,QGraphicsItem,QInputDialog,
@@ -237,128 +237,7 @@ class MainWindow(QMainWindow):
         return toolbar
 
 
-    def create_harness_example(self):
-        """Create a T-configuration harness with proper topology"""
-    
-        # Set netlist in topology manager
-        from model.netlist import Netlist
-        self.netlist = Netlist()
-        self.topology_manager.set_netlist(self.netlist)
-        
-        # 1. CREATE CONNECTORS
-        c1 = ConnectorItem(100, 200, pin_count=3)  # Left
-        c2 = ConnectorItem(500, 100, pin_count=3)  # Top right
-        c3 = ConnectorItem(500, 300, pin_count=3)  # Bottom right
-        
-        # Setup topology for connectors
-        c1.set_topology_manager(self.topology_manager)
-        c2.set_topology_manager(self.topology_manager)
-        c3.set_topology_manager(self.topology_manager)
-        c1.set_main_window(self)
-        c2.set_main_window(self)
-        c3.set_main_window(self)
-        
-        # Create topology nodes
-        c1.create_topology_node()
-        c2.create_topology_node()
-        c3.create_topology_node()
-        
-        # Add to scene
-        self.scene.addItem(c1)
-        self.scene.addItem(c2)
-        self.scene.addItem(c3)
-        
-        # 2. CREATE BRANCH POINT (T-junction)
-        bp_pos = (300, 200)  # Between connectors
-        bp_node = self.topology_manager.create_branch_point(bp_pos, "split")
-        bp_graphics = BranchPointGraphicsItem(bp_node)
-        self.scene.addItem(bp_graphics)
-        
-        # 3. CREATE SEGMENTS (The "roads")
-        # Main trunk: C1 to Branch Point
-        seg1 = self.topology_manager.create_segment(c1.topology_node, bp_node)
-        seg1_graphics = SegmentGraphicsItem(seg1, self.topology_manager)
-        self.scene.addItem(seg1_graphics)
-        
-        # Branch to C2
-        seg2 = self.topology_manager.create_segment(bp_node, c2.topology_node)
-        seg2_graphics = SegmentGraphicsItem(seg2, self.topology_manager)
-        self.scene.addItem(seg2_graphics)
-        
-        # Branch to C3
-        seg3 = self.topology_manager.create_segment(bp_node, c3.topology_node)
-        seg3_graphics = SegmentGraphicsItem(seg3, self.topology_manager)
-        self.scene.addItem(seg3_graphics)
-        
-        # Store segments for later use
-        self.segments = [seg1, seg2, seg3]
-        
-        # 4. CREATE WIRES (The "vehicles")
-        # Wire 1: C1 Pin1 to C2 Pin1 (through branch point)
-        wire1 = self.topology_manager.route_wire(c1.pins[0], c2.pins[0], [bp_node])
-        
-        # Wire 2: C1 Pin2 to C3 Pin2 (through branch point)
-        wire2 = self.topology_manager.route_wire(c1.pins[1], c3.pins[1], [bp_node])
-        
-        # Wire 3: C1 Pin3 to C2 Pin3 (through branch point)
-        wire3 = self.topology_manager.route_wire(c1.pins[2], c2.pins[2], [bp_node])
-        
-        # Wire 4: C1 Pin3 to C3 Pin3 (same pin, through branch point)
-        wire4 = self.topology_manager.route_wire(c1.pins[2], c3.pins[2], [bp_node])
-        
-        # Create graphics for wires
-        self.wire_graphics = []
-        
-        if wire1:
-            from graphics.wire_item import SegmentedWireItem
-            w1g = SegmentedWireItem(wire1)
-            w1g.set_main_window(self)
-            self.scene.addItem(w1g)
-            wire1.graphics_item = w1g
-            c1.pins[0].wires.append(w1g)
-            c2.pins[0].wires.append(w1g)
-            self.wire_graphics.append(w1g)
-        
-        if wire2:
-            from graphics.wire_item import SegmentedWireItem
-            w2g = SegmentedWireItem(wire2)
-            w2g.set_main_window(self)
-            self.scene.addItem(w2g)
-            wire2.graphics_item = w2g
-            c1.pins[1].wires.append(w2g)
-            c3.pins[1].wires.append(w2g)
-            self.wire_graphics.append(w2g)
-        
-        if wire3:
-            from graphics.wire_item import SegmentedWireItem
-            w3g = SegmentedWireItem(wire3)
-            w3g.set_main_window(self)
-            self.scene.addItem(w3g)
-            wire3.graphics_item = w3g
-            c1.pins[2].wires.append(w3g)
-            c2.pins[2].wires.append(w3g)
-            self.wire_graphics.append(w3g)
-        
-        if wire4:
-            from graphics.wire_item import SegmentedWireItem
-            w4g = SegmentedWireItem(wire4)
-            w4g.set_main_window(self)
-            self.scene.addItem(w4g)
-            wire4.graphics_item = w4g
-            c1.pins[2].wires.append(w4g)  # Same pin, second wire
-            c3.pins[2].wires.append(w4g)
-            self.wire_graphics.append(w4g)
-        
-        # Store references
-        self.conns = [c1, c2, c3]
-        self.wires = []
-        if wire1: self.wires.append(wire1)
-        if wire2: self.wires.append(wire2)
-        if wire3: self.wires.append(wire3)
-        if wire4: self.wires.append(wire4)
-        
-        # Add to tree views
-        self.refresh_tree_views()
+   
         
 
     def refresh_tree_views(self):
@@ -591,13 +470,7 @@ class MainWindow(QMainWindow):
         
         self.manual_router.create_branch_point_at_cursor()
 
-    def add_segment_manual(self):
-        """Create segment between two selected nodes"""
-        if not hasattr(self, 'manual_router'):
-            from utils.auto_route import ManualRouter
-            self.manual_router = ManualRouter(self.topology_manager, self)
-        
-        self.manual_router.create_segment_between_selected()
+
 
 
 
@@ -655,25 +528,9 @@ class MainWindow(QMainWindow):
         self.scene.addItem(junction_graphics)
         
     def split_segment(self):
-        """Split selected segment at mouse position"""
-        selected = self.scene.selectedItems()
-        if len(selected) != 1:
-            return
-            
-        item = selected[0]
-        if isinstance(item, SegmentGraphicsItem):
-            pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
-            new_segments = self.topology_manager.split_segment(
-                item.segment, 
-                (pos.x(), pos.y())
-            )
-            
-            # Update graphics
-            self.scene.removeItem(item)
-            for seg in new_segments:
-                seg_graphics = SegmentGraphicsItem(seg)
-                self.scene.addItem(seg_graphics)
-                
+        #to be applied
+        pass
+        
     def create_smart_wire(self):
         """Create a wire that goes through selected nodes"""
         selected = self.scene.selectedItems()
@@ -726,12 +583,12 @@ class MainWindow(QMainWindow):
         """Refresh all topology graphics"""
         # Clear existing segment graphics
         for item in self.scene.items():
-            if isinstance(item, SegmentGraphicsItem):
+            if isinstance(item, BundleItem):
                 self.scene.removeItem(item)
         
         # Recreate segment graphics
-        for segment in self.topology_manager.segments.values():
-            seg_graphics = SegmentGraphicsItem(segment)
+        for segment in self.topology_manager.bunles.values():
+            seg_graphics = BundleItem(segment)
             segment.graphics_item = seg_graphics
             self.scene.addItem(seg_graphics)
 
@@ -1517,116 +1374,7 @@ class MainWindow(QMainWindow):
         # Clear scene
         self.scene.clear()
 
-    def create_branch_from_selection(self):
-        """Create a new branch from selected nodes"""
-        selected = self.scene.selectedItems()
-        if len(selected) < 2:
-            QMessageBox.warning(self, "Selection Error", 
-                               "Select at least 2 nodes (connectors, branch points, fasteners)")
-            return
-        
-        # Filter to only node types
-        nodes = []
-        for item in selected:
-            if (isinstance(item, ConnectorItem) or 
-                isinstance(item, BranchPointGraphicsItem) or
-                isinstance(item, FastenerGraphicsItem) or
-                isinstance(item, JunctionGraphicsItem)):
-                nodes.append(item)
-        
-        if len(nodes) < 2:
-            QMessageBox.warning(self, "Selection Error", 
-                               "Select at least 2 valid nodes")
-            return
-        
-        # Open branch creation dialog
-        from dialogs.create_branch_dialog import CreateBranchDialog
-        dialog = CreateBranchDialog(self, nodes, self)
-        
-        if dialog.exec_():
-            data = dialog.get_branch_data()
-            self._create_branch_from_nodes(data['name'], data['protection'], data['nodes'])
-
-    def _create_branch_from_nodes(self, name, protection, nodes):
-        """Create a branch from the given nodes"""
-        from model.models import HarnessBranch
-        import math
-        
-        # Collect path points and node IDs
-        path_points = []
-        node_ids = []
-        
-        for i, node_item in enumerate(nodes):
-            # Get node position
-            if hasattr(node_item, 'pos'):
-                pos = node_item.pos()
-                path_points.append((pos.x(), pos.y()))
-            
-            # Get node ID
-            if hasattr(node_item, 'cid'):  # Connector
-                node_ids.append(node_item.cid)
-            elif hasattr(node_item, 'branch_node'):
-                node_ids.append(node_item.branch_node.id)
-            elif hasattr(node_item, 'fastener_node'):
-                node_ids.append(node_item.fastener_node.id)
-            elif hasattr(node_item, 'junction_node'):
-                node_ids.append(node_item.junction_node.id)
-        
-        # Create intermediate points for smooth curves
-        if len(path_points) > 2:
-            # Add Bezier control points for smooth curves
-            smoothed_points = []
-            for i in range(len(path_points) - 1):
-                p1 = path_points[i]
-                p2 = path_points[i + 1]
-                
-                smoothed_points.append(p1)
-                
-                # Add midpoint with slight offset for curve
-                if i < len(path_points) - 2:
-                    mid_x = (p1[0] + p2[0]) / 2
-                    mid_y = (p1[1] + p2[1]) / 2
-                    smoothed_points.append((mid_x, mid_y))
-            
-            smoothed_points.append(path_points[-1])
-            path_points = smoothed_points
-        
-        # Create the branch
-        branch = HarnessBranch(
-            id=f"BRANCH_{uuid.uuid4().hex[:8]}",
-            harness_id=self.project_handler.current_project.id if self.project_handler.current_project else "temp",
-            name=name,
-            protection_id=protection if protection != "None" else None,
-            path_points=path_points,
-            node_ids=node_ids,
-            wire_ids=[]
-        )
-        
-        # Store in topology manager
-        self.topology_manager.branches[branch.id] = branch
-        
-        # Create visual segments between consecutive nodes
-        from graphics.segment_item import SegmentGraphicsItem
-        
-        for i in range(len(nodes) - 1):
-            start_item = nodes[i]
-            end_item = nodes[i + 1]
-            
-            # Get topology nodes
-            start_node = self._get_topology_node(start_item)
-            end_node = self._get_topology_node(end_item)
-            
-            if start_node and end_node:
-                # Create segment
-                segment = self.topology_manager.create_segment(start_node, end_node)
-                segment_graphics = SegmentGraphicsItem(segment, self.topology_manager)
-                self.scene.addItem(segment_graphics)
-        
-        # Update branch list
-        if hasattr(self, 'branch_dock'):
-            self.branch_dock.update_list()
-        
-        self.statusBar().showMessage(f"Branch created: {name}", 3000)
+    
 
     def _get_topology_node(self, item):
         """Get topology node from graphics item"""
