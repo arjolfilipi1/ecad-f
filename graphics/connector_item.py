@@ -58,7 +58,9 @@ class ConnectorItem(QGraphicsRectItem):
 
         # Create pins based on input
         self._create_pins(pins)
-        
+        from graphics.connector_info_table import ConnectorInfoTable
+        self.info_table = ConnectorInfoTable(self)
+        self.compact_mode = False
         self.info = ConnectorInfoItem(self)
         self.shadow = QGraphicsDropShadowEffect()
 
@@ -69,6 +71,29 @@ class ConnectorItem(QGraphicsRectItem):
         self.shadow.setColor(QColor(250, 250, 250, 160)) # Shadow color with transparency
         self.setGraphicsEffect(self.shadow)
         self.shadow.setEnabled(True)
+    def update_info_display(self):
+        """Refresh the info table"""
+        if hasattr(self, 'info_table'):
+            self.info_table.update_table()
+    def toggle_info_display(self):
+        """Toggle between compact and full table view"""
+        from graphics.connector_info_table import ConnectorInfoTable, CompactConnectorInfoTable
+        
+        # Store current position
+        pos = self.info_table.pos()
+        
+        # Remove current table
+        self.info_table.deleteLater()
+        
+        # Create new table
+        if self.compact_mode:
+            self.info_table = ConnectorInfoTable(self)
+        else:
+            self.info_table = CompactConnectorInfoTable(self)
+        
+        self.compact_mode = not self.compact_mode
+        self.info_table.setPos(pos)
+        self.info_table.update_table()
     def get_node(self):
         return self.topology_node
     def __str__(self):
@@ -161,7 +186,8 @@ class ConnectorItem(QGraphicsRectItem):
             # Notify main window
             if self.main_window and hasattr(self.main_window, 'update_dispatcher'):
                 self.main_window.update_dispatcher.notify_connector_moved(self)
-            
+            if hasattr(self, 'info_table'):
+                self.info_table.update_table()
             # Update topology node position
             if self.topology_node:
                 self.topology_node.position = (self.pos().x(), self.pos().y())
@@ -184,7 +210,8 @@ class ConnectorItem(QGraphicsRectItem):
             
             if hasattr(self, 'info'):
                 self.info.update_text()
-        
+            if hasattr(self, 'info_table'):
+                self.info_table.update_table()
         elif change == self.ItemRotationHasChanged:
             # Handle rotation
             self._update_pin_positions_after_rotation()
@@ -315,7 +342,8 @@ class ConnectorItem(QGraphicsRectItem):
         for wire in list(self.wires):
             if wire in self.wires:
                 self.wires.remove(wire)
-   
+        if hasattr(self, 'info_table'):
+            self.info_table.deleteLater()
 
 class ConnectorInfoItem(QGraphicsTextItem):
     def __init__(self, connector):

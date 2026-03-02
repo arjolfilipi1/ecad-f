@@ -29,7 +29,7 @@ class AddWireCommand(BaseCommand):
             self.main_window.wires.append(self.wire)
         if hasattr(self.main_window, 'imported_wire_items'):
             self.main_window.imported_wire_items.append(self.wire)
-        
+        self._refresh_connector_tables()
         self.main_window.refresh_tree_views()
     
     def undo(self):
@@ -42,11 +42,19 @@ class AddWireCommand(BaseCommand):
         # Remove from main window lists
         if hasattr(self.main_window, 'wires') and self.wire in self.main_window.wires:
             self.main_window.wires.remove(self.wire)
-        if hasattr(self.main_window, 'imported_wire_items') and self.wire in self.scene.parent().imported_wire_items:
+        if hasattr(self.main_window, 'imported_wire_items') and self.wire in self.main_window.imported_wire_items:
             self.main_window.imported_wire_items.remove(self.wire)
-        
+        self._refresh_connector_tables()
         self.main_window.refresh_tree_views()
-
+    def _refresh_connector_tables(self):
+        """Refresh info tables for affected connectors"""
+        # Refresh from connector's table
+        if hasattr(self.from_pin.parent, 'info_table'):
+            self.from_pin.parent.info_table.refresh()
+        
+        # Refresh to connector's table
+        if hasattr(self.to_pin.parent, 'info_table'):
+            self.to_pin.parent.info_table.refresh()
 
 class DeleteWireCommand(BaseCommand):
     """Delete a wire"""

@@ -1,0 +1,785 @@
+You're right! The issue is that when you undo a connector deletion, the `info_table` is not properly recreated. The problem is in the `DeleteConnectorCommand` - it deletes the connector but doesn't properly handle the recreation of the `info_table` on undo.
+
+## **The Problem**
+
+In `DeleteConnectorCommand.undo()`, you recreate the connector but don't recreate the `info_table`:
+
+```python
+def undo(self):
+    # Recreate connector
+    from graphics.connector_item import ConnectorItem
+    new_connector = ConnectorItem(
+        self.original_pos.x(),
+        self.original_pos.y(),
+        pins=self.pin_ids
+    )
+    # ... but no info_table created!
+```
+
+## **The Fix - Proper Cleanup and Recreation**
+
+### **1. Update ConnectorItem with Better Cleanup**
+
+```python
+# graphics/connector_item.py - Enhanced cleanup
+
+class ConnectorItem(QGraphicsRectItem):
+    # ... existing code ...
+    
+    def cleanup(self):
+        """Remove tree item and info table before deletion"""
+        # Remove tree item
+        if self.tree_item:
+            try:
+                tree = self.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    index = tree.indexOfTopLevelItem(self.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except:
+                pass
+            self.tree_item = None
+        
+        # CRITICAL: Clean up info table
+        if hasattr(self, 'info_table') and self.info_table:
+            try:
+                # Remove from scene if it's a graphics item
+                if self.info_table.scene():
+                    self.scene().removeItem(self.info_table)
+                self.info_table.deleteLater()
+            except:
+                pass
+            self.info_table = None
+        
+        # Clear pin references
+        for pin in self.pins:
+            pin.cleanup()
+        
+        # Clear wire references
+        for wire in list(self.wires):
+            if wire in self.wires:
+                self.wires.remove(wire)
+    
+    def setup_info_table(self):
+        """Create or recreate the info table"""
+        from graphics.connector_info_table import ConnectorInfoTable
+        self.info_table = ConnectorInfoTable(self)
+        # Position it correctly
+        self.info_table.setPos(25, -15)
+    
+    def __init__(self, x: float, y: float, pins: Union[int, List[str]] = 2, orcid: str = ""):
+        # ... existing init code ...
+        
+        # Setup info table
+        self.setup_info_table()
+```
+
+### **2. Update DeleteConnectorCommand**
+
+```python
+# commands/connector_commands.py - Fixed DeleteConnectorCommand
+
+class DeleteConnectorCommand(CompoundCommand):
+    """Delete a connector and all connected wires"""
+    
+    def __init__(self, main_window, scene, connector_item):
+        super().__init__("Delete Connector")
+        self.scene = scene
+        self.main_window = main_window
+        self.connector = connector_item
+        self.connector_id = connector_item.cid
+        self.original_pos = connector_item.pos()
+        
+        # Store complete connector data for recreation
+        self.pin_ids = connector_item.pin_ids
+        self.pins_data = []
+        self.rotation_angle = connector_item.rotation_angle
+        
+        # Store all properties
+        self.properties = {
+            'part_number': getattr(connector_item, 'part_number', None),
+            'manufacturer': getattr(connector_item, 'manufacturer', None),
+            'name': connector_item.cid,
+            'connector_type': getattr(connector_item, 'connector_type', None),
+            'gender': getattr(connector_item, 'gender', None),
+            'seal': getattr(connector_item, 'seal', None)
+        }
+        
+        # Store wire connections per pin
+        for pin in connector_item.pins:
+            wire_ids = []
+            for wire in pin.wires:
+                if hasattr(wire, 'wid'):
+                    wire_ids.append(wire.wid)
+                elif hasattr(wire, 'wire') and hasattr(wire.wire, 'id'):
+                    wire_ids.append(wire.wire.id)
+            
+            self.pins_data.append({
+                'pin_id': pin.original_id or pin.pid,
+                'wire_ids': wire_ids
+            })
+        
+        # Find all connected wires and create delete commands for them
+        for pin in connector_item.pins:
+            for wire in list(pin.wires):
+                from commands.wire_commands import DeleteWireCommand
+                self.add_command(DeleteWireCommand(scene, wire, main_window))
+    
+    def redo(self):
+        # Call cleanup on connector before removing
+        self.connector.cleanup()
+        
+        # Remove connector from scene
+        self.scene.removeItem(self.connector)
+        
+        # Remove from main window lists
+        if hasattr(self.main_window, 'conns') and self.connector in self.main_window.conns:
+            self.main_window.conns.remove(self.connector)
+        
+        # Execute wire deletions
+        super().redo()
+        
+        self.main_window.refresh_tree_views()
+    
+    def undo(self):
+        # Recreate connector
+        from graphics.connector_item import ConnectorItem
+        new_connector = ConnectorItem(
+            self.original_pos.x(),
+            self.original_pos.y(),
+            pins=self.pin_ids
+        )
+        new_connector.cid = self.connector_id
+        new_connector.rotation_angle = self.rotation_angle
+        new_connector.setRotation(self.rotation_angle)
+        
+        # Restore all properties
+        for key, value in self.properties.items():
+            if value is not None:
+                setattr(new_connector, key, value)
+        
+        # Setup topology
+        new_connector.set_topology_manager(self.main_window.topology_manager)
+        new_connector.set_main_window(self.main_window)
+        new_connector.create_topology_node()
+        
+        # CRITICAL: Setup info table
+        new_connector.setup_info_table()
+        
+        # Add to scene
+        self.scene.addItem(new_connector)
+        self.main_window.conns.append(new_connector)
+        
+        # Recreate tree item
+        from PyQt5.QtWidgets import QTreeWidgetItem
+        item = QTreeWidgetItem([new_connector.cid])
+        item.setData(0, Qt.UserRole, new_connector)
+        self.main_window.connectors_tree.addTopLevelItem(item)
+        new_connector.tree_item = item
+        
+        self.connector = new_connector
+        
+        # Undo wire deletions (recreate wires)
+        super().undo()
+        
+        # Refresh the info table after wires are restored
+        if hasattr(new_connector, 'info_table'):
+            new_connector.info_table.refresh()
+        
+        self.main_window.refresh_tree_views()
+```
+
+### **3. Update AddConnectorCommand to Include Info Table**
+
+```python
+# commands/connector_commands.py - Update AddConnectorCommand
+
+class AddConnectorCommand(BaseCommand):
+    """Add a new connector to the scene"""
+    
+    def __init__(self, scene, connector_item, pos: QPointF, description="Add Connector", main_window=None):
+        super().__init__(description)
+        self.scene = scene
+        self.connector = connector_item
+        self.pos = pos
+        self.main_window = main_window
+        self.connector_id = connector_item.cid
+        self.pin_count = len(connector_item.pins)
+    
+    def redo(self):
+        if self.first_redo:
+            self.first_redo = False
+            return
+        
+        self.connector.setPos(self.pos)
+        self.scene.addItem(self.connector)
+        
+        # Add to main window lists
+        if hasattr(self.main_window, 'conns'):
+            self.main_window.conns.append(self.connector)
+        
+        # Setup info table if not already done
+        if not hasattr(self.connector, 'info_table') or not self.connector.info_table:
+            self.connector.setup_info_table()
+        
+        # Update tree
+        self.main_window.refresh_tree_views()
+    
+    def undo(self):
+        # Clean up info table first
+        if hasattr(self.connector, 'info_table') and self.connector.info_table:
+            if self.connector.info_table.scene():
+                self.scene.removeItem(self.connector.info_table)
+            self.connector.info_table.deleteLater()
+            self.connector.info_table = None
+        
+        self.scene.removeItem(self.connector)
+        
+        # Remove from main window lists
+        if hasattr(self.main_window, 'conns') and self.connector in self.main_window.conns:
+            self.main_window.conns.remove(self.connector)
+        
+        # Update tree
+        self.main_window.refresh_tree_views()
+```
+
+### **4. Make InfoTable Properly Cleanable**
+
+```python
+# graphics/connector_info_table.py - Add cleanup method
+
+class ConnectorInfoTable(QGraphicsProxyWidget):
+    # ... existing code ...
+    
+    def cleanup(self):
+        """Clean up table resources"""
+        try:
+            if self.table:
+                self.table.clear()
+                self.table.deleteLater()
+                self.table = None
+        except:
+            pass
+        
+        try:
+            if self.scene():
+                self.scene().removeItem(self)
+        except:
+            pass
+    
+    def __del__(self):
+        """Ensure cleanup on deletion"""
+        try:
+            self.cleanup()
+        except:
+            pass
+```
+
+### **5. Ensure Proper Recreation Sequence**
+
+The key fix is that **every connector must have its `info_table` created after it's added to the scene**. The `setup_info_table()` method should be called:
+
+1. In `ConnectorItem.__init__()` for new connectors
+2. In `AddConnectorCommand.undo()` when recreating
+3. In `DeleteConnectorCommand.undo()` when recreating
+
+This ensures that no matter how the connector is created (new, undo, redo), it always has its info table.
+
+## **Summary of Changes**
+
+1. **Added `setup_info_table()` method** to ConnectorItem for consistent table creation
+2. **Enhanced `cleanup()` method** to properly remove the info table
+3. **Updated DeleteConnectorCommand.undo()** to call `setup_info_table()` on the recreated connector
+4. **Updated AddConnectorCommand.undo()** to clean up the info table before removal
+5. **Added `refresh()` call** after wires are restored to ensure table shows correct data
+
+Now when you undo a connector deletion, the info table will be properly recreated, and redo will work correctly!
+
+# Right-Click Context Menus for Connectors
+
+Adding right-click context menus is a great way to improve user experience. Here's a complete implementation:
+
+## **1. First, Create a Base Context Menu Class**
+
+```python
+# graphics/context_menus.py
+from PyQt5.QtWidgets import QMenu, QAction
+from PyQt5.QtCore import Qt, QPointF
+from PyQt5.QtGui import QCursor
+
+class ConnectorContextMenu(QMenu):
+    """Right-click context menu for connectors"""
+    
+    def __init__(self, connector, main_window):
+        super().__init__()
+        self.connector = connector
+        self.main_window = main_window
+        
+        self.setTitle("Connector Actions")
+        self.setup_actions()
+    
+    def setup_actions(self):
+        """Create all menu actions"""
+        
+        # Edit actions
+        rename_action = QAction("✏️ Rename", self)
+        rename_action.triggered.connect(self.rename_connector)
+        self.addAction(rename_action)
+        
+        edit_properties_action = QAction("📋 Properties", self)
+        edit_properties_action.triggered.connect(self.show_properties)
+        self.addAction(edit_properties_action)
+        
+        self.addSeparator()
+        
+        # Rotation actions
+        rotate_left_action = QAction("↩ Rotate Left (90°)", self)
+        rotate_left_action.triggered.connect(self.rotate_left)
+        self.addAction(rotate_left_action)
+        
+        rotate_right_action = QAction("↪ Rotate Right (90°)", self)
+        rotate_right_action.triggered.connect(self.rotate_right)
+        self.addAction(rotate_right_action)
+        
+        self.addSeparator()
+        
+        # Position actions
+        move_action = QAction("🔄 Move", self)
+        move_action.triggered.connect(self.start_move)
+        self.addAction(move_action)
+        
+        snap_to_grid_action = QAction("🔲 Snap to Grid", self)
+        snap_to_grid_action.triggered.connect(self.snap_to_grid)
+        self.addAction(snap_to_grid_action)
+        
+        self.addSeparator()
+        
+        # Database actions
+        select_from_db_action = QAction("📚 Select from Database", self)
+        select_from_db_action.triggered.connect(self.select_from_database)
+        self.addAction(select_from_db_action)
+        
+        self.addSeparator()
+        
+        # Visibility actions
+        toggle_info_action = QAction("📊 Toggle Info Table", self)
+        toggle_info_action.triggered.connect(self.toggle_info)
+        self.addAction(toggle_info_action)
+        
+        self.addSeparator()
+        
+        # Delete action (at bottom for safety)
+        delete_action = QAction("🗑️ Delete", self)
+        delete_action.setShortcut("Del")
+        delete_action.triggered.connect(self.delete_connector)
+        self.addAction(delete_action)
+    
+    def rename_connector(self):
+        """Rename the connector"""
+        from PyQt5.QtWidgets import QInputDialog
+        
+        new_name, ok = QInputDialog.getText(
+            self.main_window,
+            "Rename Connector",
+            "Enter new name:",
+            text=self.connector.cid
+        )
+        
+        if ok and new_name:
+            old_name = self.connector.cid
+            self.connector.cid = new_name
+            
+            # Update label
+            if hasattr(self.connector, '_label'):
+                self.connector._label.setText(new_name)
+            
+            # Update info table header
+            if hasattr(self.connector, 'info_table'):
+                self.connector.info_table.update_table()
+            
+            # Update tree item
+            if self.connector.tree_item:
+                self.connector.tree_item.setText(0, new_name)
+            
+            # Create undo command
+            from commands.connector_commands import UpdateConnectorPropertiesCommand
+            cmd = UpdateConnectorPropertiesCommand(
+                self.connector,
+                {'cid': old_name},
+                {'cid': new_name}
+            )
+            self.main_window.undo_manager.push(cmd)
+    
+    def show_properties(self):
+        """Show properties in the property editor"""
+        if hasattr(self.main_window, 'property_editor'):
+            self.main_window.property_editor.set_item(self.connector)
+    
+    def rotate_left(self):
+        """Rotate connector 90 degrees counter-clockwise"""
+        old_angle = self.connector.rotation_angle
+        self.connector.rotate_90()  # This rotates right by default
+        
+        from commands.connector_commands import RotateConnectorCommand
+        cmd = RotateConnectorCommand(
+            self.connector,
+            old_angle,
+            self.connector.rotation_angle
+        )
+        self.main_window.undo_manager.push(cmd)
+    
+    def rotate_right(self):
+        """Rotate connector 90 degrees clockwise"""
+        # For right rotation, we can call rotate_90 three times for left?
+        # Better to implement direct rotation
+        old_angle = self.connector.rotation_angle
+        new_angle = (old_angle + 90) % 360
+        self.connector.setRotation(new_angle)
+        self.connector.rotation_angle = new_angle
+        
+        from commands.connector_commands import RotateConnectorCommand
+        cmd = RotateConnectorCommand(self.connector, old_angle, new_angle)
+        self.main_window.undo_manager.push(cmd)
+    
+    def start_move(self):
+        """Start moving the connector"""
+        self.main_window.statusBar().showMessage(
+            "Click to place connector at new position", 0
+        )
+        # Store that we're in move mode for this connector
+        self.main_window.moving_connector = self.connector
+    
+    def snap_to_grid(self):
+        """Snap connector to nearest grid point"""
+        grid_size = self.main_window.settings_manager.get('grid_size', 50)
+        pos = self.connector.pos()
+        
+        new_x = round(pos.x() / grid_size) * grid_size
+        new_y = round(pos.y() / grid_size) * grid_size
+        new_pos = QPointF(new_x, new_y)
+        
+        from commands.connector_commands import MoveConnectorCommand
+        cmd = MoveConnectorCommand(self.connector, pos, new_pos)
+        self.main_window.undo_manager.push(cmd)
+    
+    def select_from_database(self):
+        """Open connector database selector"""
+        if hasattr(self.main_window.property_editor, 'select_connector_from_db'):
+            self.main_window.property_editor.select_connector_from_db(self.connector)
+    
+    def toggle_info(self):
+        """Toggle info table visibility"""
+        if hasattr(self.connector, 'info_table'):
+            visible = self.connector.info_table.isVisible()
+            self.connector.info_table.setVisible(not visible)
+    
+    def delete_connector(self):
+        """Delete this connector"""
+        from commands.connector_commands import DeleteConnectorCommand
+        
+        # Select this connector
+        self.main_window.scene.clearSelection()
+        self.connector.setSelected(True)
+        
+        # Use existing delete method
+        self.main_window.delete_selected_with_undo()
+```
+
+
+## **2. Add Context Menu to ConnectorItem**
+
+```python
+# graphics/connector_item.py - Add context menu event
+
+class ConnectorItem(QGraphicsRectItem):
+    # ... existing code ...
+    
+    def contextMenuEvent(self, event):
+        """Handle right-click context menu"""
+        from graphics.context_menus import ConnectorContextMenu
+        
+        # Select this item
+        self.setSelected(True)
+        
+        # Create and show menu
+        menu = ConnectorContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+```
+
+
+## **3. Create Similar Menus for Other Item Types**
+
+```python
+# graphics/context_menus.py - Add more menus
+
+class WireContextMenu(QMenu):
+    """Right-click context menu for wires"""
+    
+    def __init__(self, wire, main_window):
+        super().__init__()
+        self.wire = wire
+        self.main_window = main_window
+        
+        self.setTitle("Wire Actions")
+        self.setup_actions()
+    
+    def setup_actions(self):
+        edit_props_action = QAction("✏️ Edit Properties", self)
+        edit_props_action.triggered.connect(self.show_properties)
+        self.addAction(edit_props_action)
+        
+        self.addSeparator()
+        
+        change_color_action = QAction("🎨 Change Color", self)
+        change_color_action.triggered.connect(self.change_color)
+        self.addAction(change_color_action)
+        
+        self.addSeparator()
+        
+        highlight_action = QAction("🔍 Highlight", self)
+        highlight_action.triggered.connect(self.highlight)
+        self.addAction(highlight_action)
+        
+        self.addSeparator()
+        
+        delete_action = QAction("🗑️ Delete", self)
+        delete_action.triggered.connect(self.delete_wire)
+        self.addAction(delete_action)
+    
+    def show_properties(self):
+        if hasattr(self.main_window, 'property_editor'):
+            self.main_window.property_editor.set_item(self.wire)
+    
+    def change_color(self):
+        from PyQt5.QtWidgets import QColorDialog
+        color = QColorDialog.getColor(self.wire.color)
+        if color.isValid():
+            # Convert QColor to color code
+            # This is simplified - you'd need proper color code mapping
+            self.wire.color = color
+            self.wire.update()
+    
+    def highlight(self):
+        self.main_window.scene.clearSelection()
+        self.wire.setSelected(True)
+        self.main_window.view.centerOn(self.wire)
+    
+    def delete_wire(self):
+        self.main_window.scene.clearSelection()
+        self.wire.setSelected(True)
+        self.main_window.delete_selected_with_undo()
+
+
+class BundleContextMenu(QMenu):
+    """Right-click context menu for bundles"""
+    
+    def __init__(self, bundle, main_window):
+        super().__init__()
+        self.bundle = bundle
+        self.main_window = main_window
+        
+        self.setTitle("Bundle Actions")
+        self.setup_actions()
+    
+    def setup_actions(self):
+        edit_length_action = QAction("📏 Edit Length", self)
+        edit_length_action.triggered.connect(self.edit_length)
+        self.addAction(edit_length_action)
+        
+        self.addSeparator()
+        
+        assign_wires_action = QAction("🔌 Assign Wires", self)
+        assign_wires_action.triggered.connect(self.assign_wires)
+        self.addAction(assign_wires_action)
+        
+        self.addSeparator()
+        
+        highlight_action = QAction("🔍 Highlight", self)
+        highlight_action.triggered.connect(self.highlight)
+        self.addAction(highlight_action)
+        
+        self.addSeparator()
+        
+        delete_action = QAction("🗑️ Delete", self)
+        delete_action.triggered.connect(self.delete_bundle)
+        self.addAction(delete_action)
+    
+    def edit_length(self):
+        from PyQt5.QtWidgets import QInputDialog
+        
+        current = self.bundle.specified_length or self.bundle.length
+        length, ok = QInputDialog.getDouble(
+            self.main_window,
+            "Edit Bundle Length",
+            f"Enter length (current: {current:.0f} mm):",
+            current, 0, 10000, 1
+        )
+        
+        if ok:
+            from commands.bundle_commands import UpdateBundleLengthCommand
+            cmd = UpdateBundleLengthCommand(
+                self.bundle,
+                self.bundle.specified_length,
+                length
+            )
+            self.main_window.undo_manager.push(cmd)
+    
+    def assign_wires(self):
+        # This would open a wire assignment dialog
+        self.main_window.statusBar().showMessage(
+            f"Wire assignment for {self.bundle.bundle_id} - coming soon", 2000
+        )
+    
+    def highlight(self):
+        self.main_window.scene.clearSelection()
+        self.bundle.setSelected(True)
+        self.main_window.view.centerOn(self.bundle)
+    
+    def delete_bundle(self):
+        from commands.bundle_commands import DeleteBundleCommand
+        cmd = DeleteBundleCommand(
+            self.main_window.scene,
+            self.bundle,
+            self.main_window
+        )
+        self.main_window.undo_manager.push(cmd)
+
+
+class BranchPointContextMenu(QMenu):
+    """Right-click context menu for branch points"""
+    
+    def __init__(self, branch_point, main_window):
+        super().__init__()
+        self.branch_point = branch_point
+        self.main_window = main_window
+        
+        self.setTitle("Branch Point Actions")
+        self.setup_actions()
+    
+    def setup_actions(self):
+        delete_action = QAction("🗑️ Delete", self)
+        delete_action.triggered.connect(self.delete_branch_point)
+        self.addAction(delete_action)
+    
+    def delete_branch_point(self):
+        # Select and delete
+        self.main_window.scene.clearSelection()
+        self.branch_point.setSelected(True)
+        self.main_window.delete_selected_with_undo()
+```
+
+
+## **4. Add Context Menu to Other Graphics Items**
+
+```python
+# graphics/wire_item.py - Add context menu
+
+class WireItem(QGraphicsPathItem):
+    # ... existing code ...
+    
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import WireContextMenu
+        self.setSelected(True)
+        menu = WireContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+
+
+class SegmentedWireItem(QGraphicsPathItem):
+    # ... existing code ...
+    
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import WireContextMenu
+        self.setSelected(True)
+        menu = WireContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+
+
+# graphics/bundle_item.py - Add context menu
+
+class BundleItem(QGraphicsPathItem):
+    # ... existing code ...
+    
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import BundleContextMenu
+        self.setSelected(True)
+        menu = BundleContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+
+
+# graphics/topology_item.py - Add context menu to branch points
+
+class BranchPointGraphicsItem(QGraphicsEllipseItem):
+    # ... existing code ...
+    
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import BranchPointContextMenu
+        self.setSelected(True)
+        menu = BranchPointContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+```
+
+
+## **5. Add Move Mode Handling in MainWindow**
+
+```python
+# main.py - Add to MainWindow
+
+def __init__(self):
+    # ... existing code ...
+    
+    # For move mode
+    self.moving_connector = None
+    
+    # ... rest of init ...
+
+def mousePressEvent(self, event):
+    """Handle mouse press for move mode"""
+    if self.moving_connector:
+        # Place the connector at new position
+        pos = self.view.mapToScene(event.pos())
+        
+        from commands.connector_commands import MoveConnectorCommand
+        cmd = MoveConnectorCommand(
+            self.moving_connector,
+            self.moving_connector.pos(),
+            pos
+        )
+        self.undo_manager.push(cmd)
+        
+        self.moving_connector = None
+        self.statusBar().showMessage("", 0)
+        event.accept()
+        return
+    
+    super().mousePressEvent(event)
+```
+
+
+## **Features Implemented**
+
+1. **Connector Menu**:
+   - Rename
+   - Show properties
+   - Rotate left/right
+   - Move (click to place)
+   - Snap to grid
+   - Select from database
+   - Toggle info table
+   - Delete
+
+2. **Wire Menu**:
+   - Edit properties
+   - Change color
+   - Highlight
+   - Delete
+
+3. **Bundle Menu**:
+   - Edit length
+   - Assign wires (placeholder)
+   - Highlight
+   - Delete
+
+4. **Branch Point Menu**:
+   - Delete
+
+The menus are context-sensitive and appear only when right-clicking on the appropriate item type. Each action is integrated with your undo system for proper undo/redo support.

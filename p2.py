@@ -661,6 +661,7 @@ class MainWindow(QMainWindow):
         for item in self.conns:
             if isinstance(item, ConnectorItem):
                 item.info.update_text()
+                item.info_table.update_table()
                 
     def split_segment(segment, split_pos):
         p1 = segment.line().p1()
@@ -696,10 +697,16 @@ class MainWindow(QMainWindow):
         rotate = QAction("🔄 Rotate", self)
         rotate.triggered.connect(self.rotate)
         self.toolbar.addAction(rotate)
-        
-        toggle_info = QAction("ℹ️ Toggle Info", self)
-        toggle_info.triggered.connect(self.toggle_connector_info)
-        self.toolbar.addAction(toggle_info)
+
+        toggle_table = QAction("📊 Show Pin Table", self)
+        toggle_table.triggered.connect(self.toggle_connector_info)
+        self.toolbar.addAction(toggle_table)
+
+        # Add compact mode toggle
+        toggle_compact = QAction("📋 Compact View", self)
+        toggle_compact.triggered.connect(self.toggle_compact_mode)
+        self.toolbar.addAction(toggle_compact)
+
         # Add settings button at the end
         self.toolbar.addSeparator()
         
@@ -1887,7 +1894,9 @@ class MainWindow(QMainWindow):
         
         # Update connector info labels
         from_conn.info.update_text()
+        from_conn.info_table.update_table()
         to_conn.info.update_text()
+        to_conn.info_table.update_table()
         
         # Refresh tree
         self.refresh_tree_views()
@@ -1957,7 +1966,23 @@ class MainWindow(QMainWindow):
                 "No Bundle Path",
                 "Could not find a bundle path connecting these connectors. Wire remains direct."
             )
+    def toggle_connector_info(self):
+        """Toggle connector info display (table format)"""
+        for item in self.scene.items():
+            if isinstance(item, ConnectorItem):
+                if hasattr(item, 'info_table'):
+                    visible = item.info_table.isVisible()
+                    item.info_table.setVisible(not visible)
+                elif hasattr(item, 'info'):
+                    # Fallback for old style
+                    visible = item.info.isVisible()
+                    item.info.setVisible(not visible)
 
+    def toggle_compact_mode(self):
+        """Toggle between compact and full table view"""
+        for item in self.scene.selectedItems():
+            if isinstance(item, ConnectorItem) and hasattr(item, 'toggle_info_display'):
+                item.toggle_info_display()
 
 app = QApplication(sys.argv)
 window = MainWindow()
