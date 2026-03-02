@@ -21,6 +21,7 @@ class BundleItem(QGraphicsPathItem):
         self.end_point = end_point or start_point
         self.start_node = None
         self.end_node = None
+        self.node_type = "Bundle"
         self.length = 0.0
         self.specified_length = None  # User-specified length override
         self.wire_count = 0
@@ -71,7 +72,64 @@ class BundleItem(QGraphicsPathItem):
         self._is_hovered = False
         self.tree_item = None
         self.update_path()
+        
+        # Add node tracking
+        self.start_node = None
+        self.end_node = None
+        self.start_item = None  # Graphics item at start
+        self.end_item = None    # Graphics item at end
+        
+        # Flag to prevent recursive updates
+        self._updating = False
+    def set_start_node(self, node, graphics_item=None):
+        """Set the start node and optionally its graphics item"""
+        self.start_node = node
+        if graphics_item:
+            self.start_item = graphics_item
     
+    def set_end_node(self, node, graphics_item=None):
+        """Set the end node and optionally its graphics item"""
+        self.end_node = node
+        if graphics_item:
+            self.end_item = graphics_item
+    
+    def update_position_from_nodes(self):
+        """Update bundle position based on connected nodes"""
+        if self._updating:
+            return
+        
+        self._updating = True
+        
+        try:
+            changed = False
+            
+            # Update start point from node
+            if self.start_node:
+                new_start = QPointF(self.start_node.position[0], self.start_node.position[1])
+                if self.start_point != new_start:
+                    self.start_point = new_start
+                    changed = True
+            
+            # Update end point from node
+            if self.end_node:
+                new_end = QPointF(self.end_node.position[0], self.end_node.position[1])
+                if self.end_point != new_end:
+                    self.end_point = new_end
+                    changed = True
+            
+            # Update path if anything changed
+            if changed:
+                self.update_path()
+                
+                # Update any wires in this bundle
+                for wire_id in self.wire_ids:
+                    # Find wire graphics and update
+                    for wire_item in getattr(self.scene(), 'selectedItems', lambda: [])():
+                        if hasattr(wire_item, 'wire') and wire_item.wire.id == wire_id:
+                            wire_item.update_path()
+        finally:
+            self._updating = False
+
     def update_path(self):
         """Update the bundle path"""
         path = QPainterPath()
@@ -99,6 +157,8 @@ class BundleItem(QGraphicsPathItem):
         mid_point = (self.start_point + self.end_point) / 2
         self.length_label.setPos(mid_point)
         self.workspace_label.setPos(mid_point.x(), mid_point.y() + 15)
+        if hasattr(self, 'length_label'):
+            self.length_label.setRotation(math.degrees(math.atan2(self.end_point.y()-self.start_point.y(), self.end_point.x()-self.start_point.x())))
         self.update_label_text()
     
     def update_label_text(self):
@@ -191,7 +251,7 @@ class BundleItem(QGraphicsPathItem):
                 self.length_label.setPlainText(f"{self.specified_length:.0f} mm* ({self.wire_count})")
             else:
                 self.length_label.setPlainText(f"{self.length:.0f} units ({self.wire_count})")
-
+            self.length_label.setRotation(math.degrees(math.atan2(self.end_point.y()-self.start_point.y(), self.end_point.x()-self.start_point.x())))
         """Update visual appearance based on state"""
         if self.state == self.SELECTED:
             self.setPen(self.pen_selected)

@@ -209,22 +209,23 @@ class BundleDrawTool(QObject):
         # Snap to the item's position
         if isinstance(start_item, ConnectorItem):
             start_pos = start_item.pos()
-            self.current_start_node = start_item.topology_node
+            self.current_start_node = start_item.get_node()
         elif isinstance(start_item, BranchPointGraphicsItem):
             start_pos = start_item.pos()
-            self.current_start_node = start_item.branch_node
+            self.current_start_node = start_item.get_node()
         elif isinstance(start_item, JunctionGraphicsItem):
             start_pos = start_item.pos()
-            self.current_start_node = start_item.junction_node
+            self.current_start_node = start_item.get_node()
         elif isinstance(start_item, FastenerGraphicsItem):
             start_pos = start_item.pos()
-            self.current_start_node = start_item.fastener_node
+            self.current_start_node = start_item.get_node()
         else:
             start_pos, _ = self.get_snapped_position(pos)
             self.current_start_node = None
         
         self.is_drawing = True
         self.current_segment_start = start_pos
+        self.start_item = start_item
         self.current_start_item = start_item
         self.pending_segments = []
         
@@ -334,11 +335,10 @@ class BundleDrawTool(QObject):
         if specified_length is not None:
             bundle.set_specified_length(specified_length)
         
-        # Store node references
-        bundle.start_node = self.current_start_node
-        bundle.end_node = end_node
-        bundle.start_item = self.current_start_item
-        bundle.end_item = end_item
+        # Store node references with graphics items
+        bundle.set_start_node(self.current_start_item.get_node(),self.current_start_item)
+        bundle.set_end_node( end_node,end_item)
+        # print("set",bundle.start_node,bundle.end_node,bundle.start_item,bundle.end_item)
         
         # Add to scene using undo command
         from commands.bundle_commands import AddBundleCommand

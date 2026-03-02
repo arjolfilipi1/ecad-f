@@ -59,12 +59,34 @@ class TopologyManager:
         end_pos = QPointF(segment.end_node.position[0], segment.end_node.position[1])
         
         bundle = BundleItem(start_pos, end_pos, topology_segment=segment)
-        bundle.start_node = segment.start_node
-        bundle.end_node = segment.end_node
+        
+        # Find graphics items for nodes
+        start_graphics = None
+        end_graphics = None
+        
+        # Look for connector graphics
+        if hasattr(self.main_window, 'conns'):
+            for conn in self.main_window.conns:
+                if conn.topology_node == segment.start_node:
+                    start_graphics = conn
+                if conn.topology_node == segment.end_node:
+                    end_graphics = conn
+        
+        # Look for branch point graphics
+        if hasattr(self.main_window, 'scene'):
+            for item in self.main_window.scene.items():
+                if hasattr(item, 'branch_node') and item.branch_node == segment.start_node:
+                    start_graphics = item
+                if hasattr(item, 'branch_node') and item.branch_node == segment.end_node:
+                    end_graphics = item
+        
+        bundle.set_start_node(segment.start_node, start_graphics)
+        bundle.set_end_node(segment.end_node, end_graphics)
         bundle.auto_created = True
         
         self.bundles[bundle.bundle_id] = bundle
         return bundle
+
 
     def find_path(self, start_node: TopologyNode, end_node: TopologyNode) -> List[WireSegment]:
         """Find shortest path between two nodes using BFS"""

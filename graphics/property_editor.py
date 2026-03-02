@@ -92,7 +92,7 @@ class PropertyEditor(QWidget):
         """Create editor for other items"""
         # Header
         header = QLabel(f"Type: {type(item)}")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         self.content_layout.addStretch()
     def create_connector_editor(self, connector_item):
@@ -100,7 +100,7 @@ class PropertyEditor(QWidget):
         
         # Header
         header = QLabel(f"Connector: {connector_item.cid}")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         
         # Basic properties group
@@ -270,7 +270,7 @@ class PropertyEditor(QWidget):
         
         # Header
         header = QLabel(f"Wire: {wire_item.wid}")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         
         # Basic properties
@@ -342,7 +342,7 @@ class PropertyEditor(QWidget):
     def create_branch_editor(self, branch_item):
         """Create editor for branch point properties"""
         header = QLabel(f"Branch Point")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         
         # Basic properties
@@ -384,7 +384,7 @@ class PropertyEditor(QWidget):
     def create_segment_editor(self, segment_item):
         """Create editor for segment properties"""
         header = QLabel(f"{type(segment_item)}|Segment: {segment_item.segment.id}")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         
         # Basic info
@@ -511,10 +511,10 @@ class PropertyEditor(QWidget):
                     connector_item.info.update_text()
     def create_bundle_editor(self, bundle_item):
         """Create editor for bundle properties"""
-        
+        print(bundle_item.end_node,bundle_item.end_item)
         # Header
         header = QLabel(f"Bundle: {bundle_item.bundle_id}")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e0e0e0;")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         
         # Basic properties group
@@ -563,23 +563,32 @@ class PropertyEditor(QWidget):
         
         # Start node
         start_node_text = "None"
-        if bundle_item.start_node:
-            start_node_text = bundle_item.start_node.id[:16] + "..."
+        if bundle_item.start_item:
+            # if hasattr(bundle_item.start_item,'id'):
+            s = str(bundle_item.start_item)
+            start_node_text = s[:16] + "..." if len(s) > 16 else s
+            # start_node_text = str(bundle_item.start_item)[:16] + "..."
+            # elif hasattr(bundle_item.start_item,'cid'):
+                # start_node_text = bundle_item.start_item.cid[:16] + "..."
         self.bundle_start_node = QLabel(start_node_text)
         nodes_layout.addRow("Start Node:", self.bundle_start_node)
         
         # End node
         end_node_text = "None"
-        if bundle_item.end_node:
-            end_node_text = bundle_item.end_node.id[:16] + "..."
+        if bundle_item.end_item:
+            # if hasattr(bundle_item.end_item,'id'):
+            s = str(bundle_item.end_item)
+            end_node_text = s[:16] + "..." if len(s) > 16 else s
+            # elif hasattr(bundle_item.end_item,'cid'):
+                # end_node_text = bundle_item.end_item.cid[:16] + "..."
         self.bundle_end_node = QLabel(end_node_text)
         nodes_layout.addRow("End Node:", self.bundle_end_node)
         
         # Start item type
         start_type = "None"
-        if bundle_item.start_node:
-            if hasattr(bundle_item.start_node, 'cid'):
-                start_type = "Connector"
+        if bundle_item.start_item:
+            if hasattr(bundle_item.start_item, 'node_type'):
+                start_type = bundle_item.start_item.node_type
             elif hasattr(bundle_item.start_node, 'branch_node'):
                 start_type = "Branch Point"
             elif hasattr(bundle_item.start_node, 'junction_node'):
@@ -591,15 +600,10 @@ class PropertyEditor(QWidget):
         
         # End item type
         end_type = "None"
-        if bundle_item.end_node:
-            if hasattr(bundle_item.end_node, 'cid'):
-                end_type = "Connector"
-            elif hasattr(bundle_item.end_node, 'branch_node'):
-                end_type = "Branch Point"
-            elif hasattr(bundle_item.end_node, 'junction_node'):
-                end_type = "Junction"
-            elif hasattr(bundle_item.end_node, 'fastener_node'):
-                end_type = "Fastener"
+        if bundle_item.end_item:
+            if hasattr(bundle_item.end_item, 'node_type'):
+                end_type = bundle_item.end_item.node_type
+            
         self.bundle_end_type = QLabel(end_type)
         nodes_layout.addRow("End Type:", self.bundle_end_type)
         

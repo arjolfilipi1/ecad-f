@@ -16,7 +16,7 @@ class JunctionGraphicsItem(QGraphicsEllipseItem):
         self.setFlag(self.ItemIsSelectable, True)
         self.setFlag(self.ItemIsFocusable, True)
         self.setAcceptHoverEvents(True)
-        
+        self.node_type = "Junction"
         self.normal_brush = QBrush(QColor(100, 100, 100))
         self.normal_pen = QPen(Qt.black, 1)
         self.hover_pen = QPen(QColor(255, 255, 0), 2)
@@ -27,7 +27,24 @@ class JunctionGraphicsItem(QGraphicsEllipseItem):
         self.setZValue(4)
         
         self._is_hovered = False
+        self._updating = False
     
+    def _update_connected_bundles(self):
+        """Update all bundles connected to this junction"""
+        if self._updating:
+            return
+        
+        self._updating = True
+        try:
+            if hasattr(self.main_window, 'bundles'):
+                for bundle in self.main_window.bundles:
+                    if bundle.start_node == self.junction_node or bundle.end_node == self.junction_node:
+                        bundle.update_position_from_nodes()
+        finally:
+            self._updating = False
+
+    def get_node(self):
+        return self.junction_node
     def paint(self, painter, option, widget=None):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
@@ -60,11 +77,17 @@ class JunctionGraphicsItem(QGraphicsEllipseItem):
         if change == self.ItemPositionHasChanged:
             # Update node position
             self.junction_node.position = (self.pos().x(), self.pos().y())
+            
             # Update connected segments
             for segment in self.junction_node.connected_segments:
                 if hasattr(segment, 'graphics_item'):
                     segment.graphics_item.update_path()
+            
+            # NEW: Update connected bundles
+            self._update_connected_bundles()
+            
         return super().itemChange(change, value)
+
     def cleanup(self):
         """Clean up junction references"""
         pass
@@ -75,7 +98,7 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         super().__init__(-7, -7, 14, 14)
         self.branch_node = branch_node
         self.setPos(*branch_node.position)
-        
+        self.node_type = "Branch point"
         # Enable selection and hover
         self.setFlag(self.ItemIsSelectable, True)
         self.setFlag(self.ItemIsFocusable, True)
@@ -96,6 +119,37 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         self.setZValue(3)
         
         self._is_hovered = False
+        self._updating = False
+    def get_node(self):
+        return self.branch_node
+    def _update_connected_bundles(self):
+        """Update all bundles connected to this branch point"""
+        if self._updating:
+            return
+        
+        self._updating = True
+        try:
+            if hasattr(self.main_window, 'bundles'):
+                for bundle in self.main_window.bundles:
+                    if bundle.start_node == self.branch_node or bundle.end_node == self.branch_node:
+                        bundle.update_position_from_nodes()
+        finally:
+            self._updating = False
+    
+    def itemChange(self, change, value):
+        if change == self.ItemPositionHasChanged:
+            self.branch_node.position = (self.pos().x(), self.pos().y())
+            
+            # Update connected segments
+            for segment in self.branch_node.connected_segments:
+                if hasattr(segment, 'graphics_item'):
+                    segment.graphics_item.update_path()
+            
+            # NEW: Update connected bundles
+            self._update_connected_bundles()
+            
+        return super().itemChange(change, value)
+
 
     def paint(self, painter, option, widget=None):
         """Custom paint with glow effects"""
@@ -147,7 +201,7 @@ class FastenerGraphicsItem(QGraphicsEllipseItem):
         self.setFlag(self.ItemIsSelectable, True)
         self.setFlag(self.ItemIsFocusable, True)
         self.setAcceptHoverEvents(True)
-        
+        self.node_type = "Fastner"
         # Visual properties based on fastener type
         if fastener_node.fastener_type == "cable_tie":
             self.normal_brush = QBrush(QColor(0, 150, 255))  # Blue for cable ties
@@ -165,7 +219,8 @@ class FastenerGraphicsItem(QGraphicsEllipseItem):
         self.setZValue(3)
         
         self._is_hovered = False
-    
+    def get_node(self):
+        return self.fastener_node
     def paint(self, painter, option, widget=None):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)

@@ -8,7 +8,7 @@ class PinItem(QGraphicsEllipseItem):
         super().__init__(-3, -3, 6, 6, parent)
         self.pid = pid  # e.g., "C0_A1"
         self.original_id = None  # will be set by connector
-
+        self.node_type = "Pin"
         self.pos = pos
         self.offset = offset  # Position RELATIVE to parent connector
         self.wires = []

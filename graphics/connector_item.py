@@ -34,10 +34,11 @@ class ConnectorItem(QGraphicsRectItem):
         self.tree_item = None
         self.rotation_angle = 0
         self.wires = []
+        self.bundles = []
         self.main_window = None
         self.topology_manager = None
         self.topology_node = None
-        
+        self.node_type = "Connector"
         # Visual properties
         self.normal_brush = QBrush(Qt.lightGray)
         self.normal_pen = QPen(Qt.black, 1)
@@ -68,7 +69,23 @@ class ConnectorItem(QGraphicsRectItem):
         self.shadow.setColor(QColor(250, 250, 250, 160)) # Shadow color with transparency
         self.setGraphicsEffect(self.shadow)
         self.shadow.setEnabled(True)
+    def get_node(self):
+        return self.topology_node
+    def __str__(self):
+        return self.cid
+    def _update_connected_bundles(self):
+        """Update all bundles connected to this connector"""
+        if not self.topology_node:
+            print("no topology node")
+            return
         
+        # Find all bundles connected to this node
+        if hasattr(self.main_window, 'bundles'):
+            for bundle in self.main_window.bundles:
+                print("se",bundle.start_node , self.topology_node , bundle.end_node , self.topology_node)
+                if bundle.start_node == self.topology_node or bundle.end_node == self.topology_node:
+                    bundle.update_position_from_nodes()
+
     def _create_pins(self, pins_spec: Union[int, List[str]]):
         """Create pin items from specification"""
         self.pins.clear()
@@ -131,7 +148,6 @@ class ConnectorItem(QGraphicsRectItem):
     
     def itemChange(self, change, value):
         if change == self.ItemSelectedChange:
-            # Selection state is changing
             self.update()
             
         if change == QGraphicsItem.GraphicsItemChange.ItemSceneHasChanged:
@@ -139,11 +155,10 @@ class ConnectorItem(QGraphicsRectItem):
                 self.cleanup()
             
         elif change == self.ItemPositionChange:
-            # Store old position for topology updates
             self.old_pos = self.pos()
             
         elif change == self.ItemPositionHasChanged:
-                # Notify main window
+            # Notify main window
             if self.main_window and hasattr(self.main_window, 'update_dispatcher'):
                 self.main_window.update_dispatcher.notify_connector_moved(self)
             
@@ -161,6 +176,9 @@ class ConnectorItem(QGraphicsRectItem):
             # Update segments
             self._update_connected_segments()
             
+            # NEW: Update connected bundles
+            self._update_connected_bundles()
+            
             # Update label
             self.update_label_pos()
             
@@ -175,8 +193,11 @@ class ConnectorItem(QGraphicsRectItem):
                     if hasattr(wire, 'update_path'):
                         wire.update_path()
             self._update_connected_segments()
+            # NEW: Update connected bundles (rotation affects pin positions)
+            self._update_connected_bundles()
         
         return super().itemChange(change, value)
+
 
     
     def _update_pin_positions_after_rotation(self):

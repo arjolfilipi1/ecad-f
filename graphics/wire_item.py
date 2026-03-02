@@ -13,6 +13,7 @@ class WireItem(QGraphicsPathItem):
     def __init__(self, wid, start_pin, end_pin, color_txt="SW", net=None):
         super().__init__()
         self.wid = wid
+        self.node_type = "Wire"
         self.start_pin = start_pin  # This is a PinItem!
         self.end_pin = end_pin      # This is a PinItem!
         self.tree_item = None
@@ -164,7 +165,7 @@ class SegmentedWireItem(QGraphicsPathItem):
         self.setFlag(self.ItemIsSelectable)
         self.setZValue(2)  # Wires above segments
         self.main_window = None
-
+        self.node_type = "Wire segment"
          # Visual properties
         self.color = QColor(*wire.color_data.rgb)
         self.normal_pen = QPen(self.color, 1.5)
