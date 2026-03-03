@@ -9,7 +9,8 @@ import uuid
 from graphics.bundle_item import BundleItem
 
 class TopologyManager:
-    def __init__(self):
+    def __init__(self,main_window):
+        self.main_window = main_window
         self.nodes: Dict[str, TopologyNode] = {}
         self.segments: Dict[str, WireSegment] = {}
         self.branches: Dict[str, HarnessBranch] = {}  # NEW
@@ -58,7 +59,7 @@ class TopologyManager:
         start_pos = QPointF(segment.start_node.position[0], segment.start_node.position[1])
         end_pos = QPointF(segment.end_node.position[0], segment.end_node.position[1])
         
-        bundle = BundleItem(start_pos, end_pos, topology_segment=segment)
+        bundle = BundleItem(start_point = start_pos, end_point = end_pos, topology_segment=segment , main_window = self.main_window) 
         
         # Find graphics items for nodes
         start_graphics = None

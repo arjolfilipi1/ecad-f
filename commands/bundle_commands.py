@@ -79,7 +79,7 @@ class DeleteBundleCommand(BaseCommand):
     def undo(self):
         # Recreate bundle
         from graphics.bundle_item import BundleItem
-        new_bundle = BundleItem(self.start_point, self.end_point, self.bundle_id)
+        new_bundle = BundleItem(start_point = self.start_point, end_point  = self.end_point, bundle_id = self.bundle_id,main_window = self.main_window)
         new_bundle.set_specified_length(self.specified_length)
         new_bundle.start_node = self.start_node
         new_bundle.end_node = self.end_node

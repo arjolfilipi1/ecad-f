@@ -13,9 +13,9 @@ class BundleItem(QGraphicsPathItem):
     SELECTED = 2
     CONNECTED = 3
     
-    def __init__(self, start_point, end_point: QPointF = None, bundle_id=None,topology_segment=None,broken = False):
+    def __init__(self, start_point, end_point: QPointF = None, bundle_id=None,topology_segment=None,broken = False,main_window = None):
         super().__init__()
-        
+        self.main_window = main_window
         self.bundle_id = bundle_id or f"B{id(self)}"
         self.start_point = start_point
         self.end_point = end_point or start_point
@@ -81,6 +81,14 @@ class BundleItem(QGraphicsPathItem):
         
         # Flag to prevent recursive updates
         self._updating = False
+    
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import BundleContextMenu
+        self.setSelected(True)
+        menu = BundleContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+
+    
     def set_start_node(self, node, graphics_item=None):
         """Set the start node and optionally its graphics item"""
         self.start_node = node
