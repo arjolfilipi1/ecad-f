@@ -329,7 +329,7 @@ class BundleDrawTool(QObject):
             end_item = graphics
         
         # Create the bundle
-        bundle = BundleItem(self.current_segment_start, end_pos)
+        bundle = BundleItem(start_point = self.current_segment_start, end_point = end_pos,main_window = self.main_window)
         
         # Set length if specified
         if specified_length is not None:

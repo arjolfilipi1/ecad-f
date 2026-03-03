@@ -1,5 +1,5 @@
 # graphics/connector_info_table.py
-from PyQt5.QtWidgets import QGraphicsProxyWidget, QTableWidget, QTableWidgetItem, QHeaderView
+from PyQt5.QtWidgets import QGraphicsProxyWidget, QTableWidget, QTableWidgetItem, QHeaderView,QSizePolicy
 from PyQt5.QtCore import Qt, QPointF
 from PyQt5.QtGui import QColor, QBrush, QFont
 
@@ -9,7 +9,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
     def __init__(self, connector):
         super().__init__(connector)
         self.connector = connector
-        self.setFlag(self.ItemIgnoresTransformations, True)
+        self.setFlag(self.ItemIgnoresTransformations, False)
         self.setZValue(10)
         
         # Create the table widget
@@ -27,6 +27,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
             }
             QTableWidget::item {
                 padding: 2px;
+                margin: 2px;
             }
             QHeaderView::section {
                 background-color: #e0e0e0;
@@ -48,24 +49,49 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.setTransformOriginPoint(self.boundingRect().center())
         
-        # Prevent automatic column resizing on updates
-        self.table.horizontalHeader().setStretchLastSection(False)
+        
         
         # Set the widget
         self.setWidget(self.table)
         
         # Initial position (to the right of connector)
         self.setPos(25, -15)
-        
+        # self.widget_size = self.table.size()
         # Track if we need to resize
         self.content_changed = True
         
         # Initial update
         self.update_table()
+        self.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Minimum)
+    def cleanup(self):
+        """Clean up table resources"""
+        try:
+            if self.table:
+                self.table.clear()
+                self.table.deleteLater()
+                self.table = None
+        except:
+            pass
+        
+        try:
+            if self.scene():
+                self.scene().removeItem(self)
+        except:
+            pass
+    
+    def __del__(self):
+        """Ensure cleanup on deletion"""
+        try:
+            self.cleanup()
+        except:
+            pass
+
     def refresh(self):
         """Public method to refresh the table - call this when wires change"""
         self.update_table()
+        
     def update_table(self):
         """Update the table with current pin information"""
         pins = self.connector.pins
@@ -147,7 +173,8 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         total_height = self.table.rowHeight(0) * self.table.rowCount() + self.table.horizontalHeader().height() + 10
         
         self.table.setFixedSize(total_width, total_height)
-        self.table.updateGeometry()
+        self.resize(total_width-23,total_height-9)
+        # self.table.updateGeometry()
         
         self.content_changed = False
     
@@ -158,7 +185,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         
         # Map from scene to this proxy's coordinate system
         local_pos = self.mapFromScene(scene_pos)
-        
+        print(self.size(),self.table.size())
         # Convert to QPoint for QWidget methods
         widget_pos = local_pos.toPoint()
         

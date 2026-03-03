@@ -63,7 +63,7 @@ class ConnectorItem(QGraphicsRectItem):
         self.compact_mode = False
         self.info = ConnectorInfoItem(self)
         self.shadow = QGraphicsDropShadowEffect()
-
+        self.setup_info_table()
         # 2. Configure properties
         self.shadow.setBlurRadius(10)             # Softness of the shadow (default is 1)
         self.shadow.setXOffset(5)                 # Horizontal displacement
@@ -186,8 +186,8 @@ class ConnectorItem(QGraphicsRectItem):
             # Notify main window
             if self.main_window and hasattr(self.main_window, 'update_dispatcher'):
                 self.main_window.update_dispatcher.notify_connector_moved(self)
-            if hasattr(self, 'info_table'):
-                self.info_table.update_table()
+            # if hasattr(self, 'info_table') and self.info_table is not None:
+                # self.info_table.update_table()
             # Update topology node position
             if self.topology_node:
                 self.topology_node.position = (self.pos().x(), self.pos().y())
@@ -308,7 +308,16 @@ class ConnectorItem(QGraphicsRectItem):
         painter.restore()
         
         # Draw children (pins, label, info) - they paint themselves
-    
+    def contextMenuEvent(self, event):
+        """Handle right-click context menu"""
+        from graphics.context_menus import ConnectorContextMenu
+        
+        # Select this item
+        self.setSelected(True)
+        
+        # Create and show menu
+        menu = ConnectorContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
     def hoverEnterEvent(self, event):
         """Handle mouse enter for yellow glow"""
         self._is_hovered = True
@@ -342,8 +351,25 @@ class ConnectorItem(QGraphicsRectItem):
         for wire in list(self.wires):
             if wire in self.wires:
                 self.wires.remove(wire)
-        if hasattr(self, 'info_table'):
-            self.info_table.deleteLater()
+        # CRITICAL: Clean up info table
+        if hasattr(self, 'info_table') and self.info_table:
+            try:
+                # Remove from scene if it's a graphics item
+                if self.info_table.scene():
+                    self.scene().removeItem(self.info_table)
+                self.info_table.deleteLater()
+            except:
+                pass
+            self.info_table = None
+        
+    def setup_info_table(self):
+        if self.info_table is None:
+            """Create or recreate the info table"""
+            from graphics.connector_info_table import ConnectorInfoTable
+            self.info_table = ConnectorInfoTable(self)
+            # Position it correctly
+            self.info_table.setPos(25, -15)
+
 
 class ConnectorInfoItem(QGraphicsTextItem):
     def __init__(self, connector):

@@ -9,6 +9,7 @@ from PyQt5.QtGui import QPainterPath, QPen, QColor
 from PyQt5.QtCore import Qt, QPointF
 from model.models import CombinedWireColor
 from PyQt5 import sip
+
 class WireItem(QGraphicsPathItem):
     def __init__(self, wid, start_pin, end_pin, color_txt="SW", net=None):
         super().__init__()
@@ -46,6 +47,13 @@ class WireItem(QGraphicsPathItem):
         # Initial path
         self.net = net
         self.update_path()
+        
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import WireContextMenu
+        self.setSelected(True)
+        menu = WireContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+        
     def update_path(self):
         """Update wire path connecting the TWO PIN POSITIONS"""
         if not self.is_connected:
@@ -177,6 +185,14 @@ class SegmentedWireItem(QGraphicsPathItem):
         self._is_hovered = False
         self.setZValue(4)
         self.update_path()
+    
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import WireContextMenu
+        self.setSelected(True)
+        menu = WireContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
+
+
     def paint(self, painter, option, widget=None):
         """Custom paint with glow effects"""
         painter.save()

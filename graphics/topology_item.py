@@ -149,7 +149,12 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
             self._update_connected_bundles()
             
         return super().itemChange(change, value)
-
+    
+    def contextMenuEvent(self, event):
+        from graphics.context_menus import BranchPointContextMenu
+        self.setSelected(True)
+        menu = BranchPointContextMenu(self, self.main_window)
+        menu.exec_(event.screenPos())
 
     def paint(self, painter, option, widget=None):
         """Custom paint with glow effects"""
@@ -190,6 +195,7 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         """Clean up branch point references"""
         # No tree item for branch points currently, but add for future
         pass
+        
 class FastenerGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of a fastener point"""
     def __init__(self, fastener_node):

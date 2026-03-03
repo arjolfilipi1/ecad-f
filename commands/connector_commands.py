@@ -26,11 +26,21 @@ class AddConnectorCommand(BaseCommand):
         # Add to main window lists
         if hasattr(self.main_window, 'conns'):
             self.main_window.conns.append(self.connector)
-        
+        # Setup info table if not already done
+        if not hasattr(self.connector, 'info_table') or not self.connector.info_table:
+            self.connector.setup_info_table()
+
         # Update tree
         self.main_window.refresh_tree_views()
     
     def undo(self):
+        # Clean up info table first
+        if hasattr(self.connector, 'info_table') and self.connector.info_table:
+            if self.connector.info_table.scene():
+                self.scene.removeItem(self.connector.info_table)
+            self.connector.info_table.deleteLater()
+            self.connector.info_table = None
+
         self.scene.removeItem(self.connector)
         
         # Remove from main window lists
@@ -65,7 +75,7 @@ class DeleteConnectorCommand(CompoundCommand):
         # Store connector data for recreation
         self.pin_ids = connector_item.pin_ids
         self.pins_data = []  # Store pin wire connections
-        
+        self.rotation_angle = connector_item.rotation_angle
         # Store which wires were connected to which pins
         for pin in connector_item.pins:
             wire_ids = [w.wid if hasattr(w, 'wid') else getattr(w, 'wire', object()).id 
@@ -74,9 +84,13 @@ class DeleteConnectorCommand(CompoundCommand):
                 'pin_id': pin.original_id or pin.pid,
                 'wire_ids': wire_ids
             })
-
+            # Find all connected wires and create delete commands for them
+            for wire in list(pin.wires):
+                from commands.wire_commands import DeleteWireCommand
+                self.add_command(DeleteWireCommand(scene, wire, main_window))
         
         
+            
 
         self.properties = {
             'part_number': getattr(connector_item, 'part_number', None),
@@ -94,7 +108,8 @@ class DeleteConnectorCommand(CompoundCommand):
         # Remove from main window lists
         if hasattr(self.main_window, 'conns') and self.connector in self.main_window.conns:
             self.main_window.conns.remove(self.connector)
-        
+        # Execute wire deletions
+        super().redo()
         self.main_window.refresh_tree_views()
     
     def undo(self):
@@ -106,6 +121,8 @@ class DeleteConnectorCommand(CompoundCommand):
             pins=self.pin_ids
         )
         new_connector.cid = self.connector_id
+        new_connector.rotation_angle = self.rotation_angle
+        new_connector.setRotation(self.rotation_angle)
         
         # Restore properties
         for key, value in self.properties.items():
@@ -116,7 +133,8 @@ class DeleteConnectorCommand(CompoundCommand):
         new_connector.set_topology_manager(self.main_window.topology_manager)
         new_connector.set_main_window(self.main_window)
         new_connector.create_topology_node()
-        
+        # CRITICAL: Setup info table
+        new_connector.setup_info_table()
         # Add to scene
         self.scene.addItem(new_connector)
         self.main_window.conns.append(new_connector)

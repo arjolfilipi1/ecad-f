@@ -1,3 +1,4 @@
+# database/project_db.py - Complete rewrite
 
 import sqlite3
 import json
@@ -94,7 +95,7 @@ class ProjectDatabase:
             )
         ''')
         
-        # Wires
+        # Wires (direct wires)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS wires (
                 id TEXT PRIMARY KEY,
@@ -116,7 +117,37 @@ class ProjectDatabase:
             )
         ''')
         
-        # Segments
+        # Bundles (NEW - store bundle information)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS bundles (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                start_node_id TEXT,
+                end_node_id TEXT,
+                start_point_x REAL,
+                start_point_y REAL,
+                end_point_x REAL,
+                end_point_y REAL,
+                specified_length REAL,
+                wire_count INTEGER DEFAULT 0,
+                auto_created INTEGER DEFAULT 0,
+                FOREIGN KEY (start_node_id) REFERENCES nodes(id),
+                FOREIGN KEY (end_node_id) REFERENCES nodes(id)
+            )
+        ''')
+        
+        # Bundle-Wire relationships (NEW)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS bundle_wires (
+                bundle_id TEXT,
+                wire_id TEXT,
+                PRIMARY KEY (bundle_id, wire_id),
+                FOREIGN KEY (bundle_id) REFERENCES bundles(id),
+                FOREIGN KEY (wire_id) REFERENCES wires(id)
+            )
+        ''')
+        
+        # Segments (topology segments)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS segments (
                 id TEXT PRIMARY KEY,
@@ -142,12 +173,14 @@ class ProjectDatabase:
         
         self.conn.commit()
     
-    def save_project(self, harness: WiringHarness) -> bool:
+    def save_project(self, harness: WiringHarness, bundles: list = None, imported_wires: list = None) -> bool:
         """Save complete harness project to database"""
         try:
             cursor = self.conn.cursor()
             
             # Clear existing data
+            cursor.execute("DELETE FROM bundle_wires")
+            cursor.execute("DELETE FROM bundles")
             cursor.execute("DELETE FROM wire_segments")
             cursor.execute("DELETE FROM segments")
             cursor.execute("DELETE FROM wires")
@@ -180,9 +213,24 @@ class ProjectDatabase:
             for node in harness.nodes.values():
                 self._save_node(cursor, node)
             
-            # Save wires
+            # Save wires (from harness model)
             for wire in harness.wires.values():
                 self._save_wire(cursor, wire)
+            
+            # Save imported wires (graphics items)
+            if imported_wires:
+                for wire_item in imported_wires:
+                    if hasattr(wire_item, 'wire_data'):
+                        wire_data = wire_item.wire_data
+                        # Check if wire already saved
+                        cursor.execute("SELECT id FROM wires WHERE id = ?", (wire_item.wid,))
+                        if not cursor.fetchone():
+                            self._save_imported_wire(cursor, wire_item, wire_data, harness)
+            
+            # Save bundles
+            if bundles:
+                for bundle in bundles:
+                    self._save_bundle(cursor, bundle, harness)
             
             # Save segments
             for segment in harness.branches.values():
@@ -193,6 +241,8 @@ class ProjectDatabase:
             
         except Exception as e:
             print(f"Error saving project: {e}")
+            import traceback
+            traceback.print_exc()
             self.conn.rollback()
             return False
     
@@ -216,7 +266,7 @@ class ProjectDatabase:
             getattr(connector, 'housing_color', None),
             connector.position[0] if connector.position else 0,
             connector.position[1] if connector.position else 0,
-            0,  # rotation
+            0, # rotation
             datetime.now().isoformat(),
             datetime.now().isoformat()
         ))
@@ -254,7 +304,7 @@ class ProjectDatabase:
         ))
     
     def _save_wire(self, cursor, wire: Wire):
-        """Save a wire"""
+        """Save a wire from model"""
         cursor.execute('''
             INSERT INTO wires (
                 id, name, signal_name, wire_type, cross_section,
@@ -277,6 +327,74 @@ class ProjectDatabase:
             wire.part_number,
             wire.notes
         ))
+    
+    def _save_imported_wire(self, cursor, wire_item, wire_data, harness):
+        """Save an imported wire from graphics item"""
+        cursor.execute('''
+            INSERT INTO wires (
+                id, name, signal_name, wire_type, cross_section,
+                base_color, stripe_color, from_node_id, to_node_id,
+                from_pin, to_pin, calculated_length, part_number, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            wire_item.wid,
+            wire_item.wid,
+            wire_data.signal_name if hasattr(wire_data, 'signal_name') else '',
+            None,
+            wire_data.cross_section if hasattr(wire_data, 'cross_section') else 0.5,
+            wire_data.color if hasattr(wire_data, 'color') else 'SW',
+            None,
+            f"NODE_{wire_data.from_device}",
+            f"NODE_{wire_data.to_device}",
+            wire_data.from_pin,
+            wire_data.to_pin,
+            0.0,
+            wire_data.part_number if hasattr(wire_data, 'part_number') else None,
+            None
+        ))
+    
+    def _save_bundle(self, cursor, bundle, harness):
+        """Save a bundle to database"""
+        # Get node IDs
+        start_node_id = None
+        end_node_id = None
+        
+        if bundle.start_node:
+            start_node_id = bundle.start_node.id
+        elif bundle.start_item and hasattr(bundle.start_item, 'topology_node'):
+            start_node_id = bundle.start_item.topology_node.id
+        
+        if bundle.end_node:
+            end_node_id = bundle.end_node.id
+        elif bundle.end_item and hasattr(bundle.end_item, 'topology_node'):
+            end_node_id = bundle.end_item.topology_node.id
+        
+        cursor.execute('''
+            INSERT INTO bundles (
+                id, name, start_node_id, end_node_id,
+                start_point_x, start_point_y, end_point_x, end_point_y,
+                specified_length, wire_count, auto_created
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            bundle.bundle_id,
+            getattr(bundle, 'name', bundle.bundle_id),
+            start_node_id,
+            end_node_id,
+            bundle.start_point.x(),
+            bundle.start_point.y(),
+            bundle.end_point.x(),
+            bundle.end_point.y(),
+            bundle.specified_length,
+            bundle.wire_count,
+            1 if getattr(bundle, 'auto_created', False) else 0
+        ))
+        
+        # Save bundle-wire relationships
+        for wire_id in bundle.wire_ids:
+            cursor.execute('''
+                INSERT INTO bundle_wires (bundle_id, wire_id)
+                VALUES (?, ?)
+            ''', (bundle.bundle_id, wire_id))
     
     def _save_segment(self, cursor, segment: HarnessBranch):
         """Save a branch/segment"""
@@ -358,7 +476,38 @@ class ProjectDatabase:
             
         except Exception as e:
             print(f"Error loading project: {e}")
+            import traceback
+            traceback.print_exc()
             return None
+    
+    def load_bundles(self) -> List[dict]:
+        """Load bundle data from database (for reconstruction)"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT b.*, 
+                       n1.position_x as start_x, n1.position_y as start_y,
+                       n2.position_x as end_x, n2.position_y as end_y
+                FROM bundles b
+                LEFT JOIN nodes n1 ON b.start_node_id = n1.id
+                LEFT JOIN nodes n2 ON b.end_node_id = n2.id
+            ''')
+            
+            bundles = []
+            for row in cursor.fetchall():
+                bundle_data = dict(row)
+                
+                # Get wire IDs for this bundle
+                cursor.execute("SELECT wire_id FROM bundle_wires WHERE bundle_id = ?", (bundle_data['id'],))
+                bundle_data['wire_ids'] = [r['wire_id'] for r in cursor.fetchall()]
+                
+                bundles.append(bundle_data)
+            
+            return bundles
+            
+        except Exception as e:
+            print(f"Error loading bundles: {e}")
+            return []
     
     def _load_connector(self, row) -> Optional[Connector]:
         """Load a connector from database row"""
@@ -451,18 +600,21 @@ class ProjectDatabase:
     def list_projects(self) -> List[Dict[str, Any]]:
         """List all saved projects in this database"""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT key, value FROM project_info")
+        cursor.execute("SELECT key, value FROM project_info WHERE key IN ('id', 'name', 'part_number', 'revision', 'modified_date')")
         
-        info = {}
+        projects = {}
         for row in cursor.fetchall():
-            info[row['key']] = row['value']
+            key, value = row['key'], row['value']
+            projects[key] = value
         
-        return [info] if info else []
+        return [projects] if projects else []
     
     def delete_project(self) -> bool:
         """Delete current project from database"""
         try:
             cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM bundle_wires")
+            cursor.execute("DELETE FROM bundles")
             cursor.execute("DELETE FROM wire_segments")
             cursor.execute("DELETE FROM wires")
             cursor.execute("DELETE FROM segments")
@@ -475,6 +627,8 @@ class ProjectDatabase:
         except Exception as e:
             print(f"Error deleting project: {e}")
             return False
+
+
 class ProjectFileHandler:
     """Handles project file operations with .ecad extension"""
     
@@ -503,7 +657,7 @@ class ProjectFileHandler:
         
         return self.current_project
     
-    def save_project(self, filepath: str = None) -> bool:
+    def save_project(self, filepath: str = None, bundles=None, imported_wires=None) -> bool:
         """Save project to file"""
         if not self.current_project:
             return False
@@ -517,7 +671,7 @@ class ProjectFileHandler:
             save_path += '.ecad'
         
         db = ProjectDatabase(save_path)
-        success = db.save_project(self.current_project)
+        success = db.save_project(self.current_project, bundles, imported_wires)
         db.close()
         
         if success:
@@ -590,5 +744,6 @@ class ProjectFileHandler:
             
         except Exception as e:
             print(f"Error exporting to Excel: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-

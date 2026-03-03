@@ -3,7 +3,7 @@ from model.topology_manager import TopologyManager
 from graphics.topology_item import (
     JunctionGraphicsItem, BranchPointGraphicsItem
 )
-from graphics.bundle_item import BundleItem
+
 from PyQt5 import sip
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow,QGraphicsScene,QToolBar,QAction,QDialog,QVBoxLayout,QLabel,
@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,QDoubleSpinBox,QMessageBox
     
 )
-from PyQt5.QtGui import QCursor,QPainter,QKeySequence,QColor
+from PyQt5.QtGui import QCursor,QPainter,QKeySequence,QColor,QIcon
 from graphics.schematic_view import SchematicView
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import SegmentedWireItem,WireItem
@@ -28,6 +28,8 @@ from commands.base_command import BaseCommand
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowIcon(QIcon('icon.ico'))
+        self.moving_connector = None
         self.imported_wire_items = []
         from commands.undo_manager import UndoManager
         self.undo_manager = UndoManager(self)
@@ -60,7 +62,7 @@ class MainWindow(QMainWindow):
         netlist = Netlist()
         self.conns =[]
         self.wires = []
-        self.topology_manager = TopologyManager()
+        self.topology_manager = TopologyManager(self)
         from utils.update_dispatcher import UpdateDispatcher
         self.update_dispatcher = UpdateDispatcher()
         self.update_dispatcher.connector_moved.connect(self.on_connector_moved)
@@ -142,6 +144,26 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "Loading complete...", 0
         )
+    def mousePressEvent(self, event):
+        """Handle mouse press for move mode"""
+        if self.moving_connector:
+            # Place the connector at new position
+            pos = self.view.mapToScene(event.pos())
+            
+            from commands.connector_commands import MoveConnectorCommand
+            cmd = MoveConnectorCommand(
+                self.moving_connector,
+                self.moving_connector.pos(),
+                pos
+            )
+            self.undo_manager.push(cmd)
+            
+            self.moving_connector = None
+            self.statusBar().showMessage("", 0)
+            event.accept()
+            return
+        
+        super().mousePressEvent(event)
     def select_all(self):
         """Select all items in scene"""
         for item in self.scene.items():
@@ -579,12 +601,7 @@ class MainWindow(QMainWindow):
         self.wires_tree.addTopLevelItem(item)
         wire_graphics.tree_item = item
         
-    def refresh_topology_view(self):
-        """Refresh all topology graphics"""
-        # Clear existing segment graphics
-        for item in self.scene.items():
-            if isinstance(item, BundleItem):
-                self.scene.removeItem(item)
+
         
         # Recreate segment graphics
         for segment in self.topology_manager.bunles.values():
@@ -838,7 +855,9 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.open_project)
         file_menu.addAction(open_action)
         
-        # Save project
+        file_menu.addSeparator()
+        
+        # Save
         save_action = QAction("&Save", self)
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_project)
@@ -849,6 +868,19 @@ class MainWindow(QMainWindow):
         save_as_action.setShortcut("Ctrl+Shift+S")
         save_as_action.triggered.connect(self.save_project_as)
         file_menu.addAction(save_as_action)
+        
+        # PUBLISH
+        publish_action = QAction("📤 &Publish to Database...", self)
+        publish_action.setShortcut("Ctrl+P")
+        publish_action.triggered.connect(self.publish_project)
+        file_menu.addAction(publish_action)
+        
+        file_menu.addSeparator()
+        
+        # Open from Database
+        open_from_db_action = QAction("📂 Open from Database...", self)
+        open_from_db_action.triggered.connect(self.open_from_database)
+        file_menu.addAction(open_from_db_action)
         
         file_menu.addSeparator()
         
@@ -935,9 +967,18 @@ class MainWindow(QMainWindow):
 
     def save_project(self):
         """Save current project"""
+        # Gather bundles and imported wires
+        bundles = getattr(self, 'bundles', [])
+        imported_wires = getattr(self, 'imported_wire_items', [])
+        
         if self.project_handler.current_path:
-            success = self.project_handler.save_project()
+            success = self.project_handler.save_project(
+                filepath=self.project_handler.current_path,
+                bundles=bundles,
+                imported_wires=imported_wires
+            )
             if success:
+                self.undo_manager.set_clean()
                 self.statusBar().showMessage(f"Saved: {self.project_handler.current_path}", 3000)
             else:
                 QMessageBox.critical(self, "Error", "Failed to save project")
@@ -962,8 +1003,17 @@ class MainWindow(QMainWindow):
             project = self._create_project_from_scene()
             self.project_handler.current_project = project
             
-            success = self.project_handler.save_project(filepath)
+            # Gather bundles and imported wires
+            bundles = getattr(self, 'bundles', [])
+            imported_wires = getattr(self, 'imported_wire_items', [])
+            
+            success = self.project_handler.save_project(
+                filepath=filepath,
+                bundles=bundles,
+                imported_wires=imported_wires
+            )
             if success:
+                self.undo_manager.set_clean()
                 self.setWindowTitle(f"ECAD - {project.name} ({Path(filepath).name})")
                 
                 # Add to recent files
@@ -1978,12 +2028,134 @@ class MainWindow(QMainWindow):
                     visible = item.info.isVisible()
                     item.info.setVisible(not visible)
 
+    def open_from_database(self):
+        pass
     def toggle_compact_mode(self):
         """Toggle between compact and full table view"""
         for item in self.scene.selectedItems():
             if isinstance(item, ConnectorItem) and hasattr(item, 'toggle_info_display'):
                 item.toggle_info_display()
-
+    def publish_project(self):
+        """Publish current project to central database"""
+        if not self.project_handler.current_project:
+            QMessageBox.warning(self, "No Project", "No project to publish")
+            return
+        
+        from database.publish_manager import PublishManager
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QTextEdit, QDialogButtonBox, QLabel, QCheckBox
+        
+        # Get central database path from settings
+        central_db = self.settings_manager.get('central_database_path', 
+                                               str(Path.home() / "ecad" / "central.db"))
+        
+        # Create publish dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Publish Project")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        layout.addWidget(QLabel(f"<b>Project:</b> {self.project_handler.current_project.name}"))
+        layout.addWidget(QLabel(f"<b>Part Number:</b> {self.project_handler.current_project.part_number or 'N/A'}"))
+        
+        form = QFormLayout()
+        
+        # Status
+        status_combo = QComboBox()
+        status_combo.addItems(["Draft", "Review", "Released", "Obsolete"])
+        form.addRow("Status:", status_combo)
+        
+        # Revision
+        revision_edit = QLineEdit(self.project_handler.current_project.revision)
+        form.addRow("Revision:", revision_edit)
+        
+        # Comments
+        comments_edit = QTextEdit()
+        comments_edit.setPlaceholderText("Enter check-in comments...")
+        comments_edit.setMaximumHeight(100)
+        form.addRow("Comments:", comments_edit)
+        
+        layout.addLayout(form)
+        
+        # Archive local file
+        archive_check = QCheckBox("Archive local .ecad file")
+        archive_check.setChecked(True)
+        layout.addWidget(archive_check)
+        
+        # Stats
+        bundles = getattr(self, 'bundles', [])
+        imported_wires = getattr(self, 'imported_wire_items', [])
+        routed_wires = getattr(self, 'routed_wire_items', [])
+        
+        stats = QLabel(
+            f"<small>"
+            f"Connectors: {len(self.conns)}<br>"
+            f"Direct Wires: {len(imported_wires)}<br>"
+            f"Routed Wires: {len(routed_wires) if routed_wires else 0}<br>"
+            f"Bundles: {len(bundles)}"
+            f"</small>"
+        )
+        stats.setStyleSheet("color: gray;")
+        layout.addWidget(stats)
+        
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        if dialog.exec_():
+            # Get values
+            status = status_combo.currentText()
+            revision = revision_edit.text()
+            comments = comments_edit.toPlainText()
+            
+            # Update project revision
+            self.project_handler.current_project.revision = revision
+            self.project_handler.modified = True
+            
+            # Archive local file if requested
+            archive_path = None
+            if archive_check.isChecked():
+                # Save to local .ecad first
+                archive_dir = Path.home() / "ecad" / "archive"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                archive_name = f"{self.project_handler.current_project.name}_v{revision}_{timestamp}.ecad"
+                archive_path = str(archive_dir / archive_name)
+                
+                # Gather data
+                bundles = getattr(self, 'bundles', [])
+                imported_wires = getattr(self, 'imported_wire_items', [])
+                
+                success = self.project_handler.save_project(
+                    filepath=archive_path,
+                    bundles=bundles,
+                    imported_wires=imported_wires
+                )
+                
+                if success:
+                    self.statusBar().showMessage(f"Archived to: {archive_path}", 3000)
+            
+            # Publish to database
+            publisher = PublishManager(central_db)
+            success = publisher.publish_project(
+                self.project_handler.current_project,
+                bundles=getattr(self, 'bundles', []),
+                imported_wires=getattr(self, 'imported_wire_items', []),
+                status=status,
+                comments=comments,
+                author=os.getlogin(),
+                archive_local_file=archive_path
+            )
+            publisher.close()
+            
+            if success:
+                QMessageBox.information(self, "Success", "Project published successfully!")
+                self.statusBar().showMessage(f"Published to database: {central_db}", 5000)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to publish project")
 app = QApplication(sys.argv)
 window = MainWindow()
 window.resize(1000, 800)
