@@ -25,6 +25,8 @@ from model.models import (
 from graphics.visualization_manager import VisualizationManager,VisualizationMode
 from pathlib import Path
 from commands.base_command import BaseCommand
+import os
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -939,7 +941,7 @@ class MainWindow(QMainWindow):
         filepath, _ = QFileDialog.getOpenFileName(
             self,
             "Open Project",
-            str(Path.home()),
+            str(self.settings_manager.settings.default_path),
             "ECAD Projects (*.ecad);;All Files (*)"
         )
         
@@ -1211,6 +1213,7 @@ class MainWindow(QMainWindow):
 
     def open_recent(self, filepath):
         """Open a recent file"""
+        print(filepath,Path(filepath).exists())
         if Path(filepath).exists():
             self.open_project(filepath)
         else:

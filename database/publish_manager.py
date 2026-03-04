@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 import uuid
 import os
-
+from model.models import WiringHarness
 class PublishManager:
     """Manages publishing projects to central database"""
     
@@ -325,9 +325,9 @@ class PublishManager:
                             wd.signal_name if hasattr(wd, 'signal_name') else '',
                             wd.cross_section if hasattr(wd, 'cross_section') else 0.5,
                             wd.color if hasattr(wd, 'color') else 'SW',
-                            conn_id_map.get(f"CONN_{wd.from_device}"),
+                            conn_id_map.get(f"CONN_{wd.from_node_id}"),
                             wd.from_pin,
-                            conn_id_map.get(f"CONN_{wd.to_device}"),
+                            conn_id_map.get(f"CONN_{wd.to_node_id}"),
                             wd.to_pin,
                             0.0,
                             wd.part_number if hasattr(wd, 'part_number') else None

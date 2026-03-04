@@ -25,6 +25,7 @@ class AppSettings:
     central_database_path: str = str(Path.home() / "ecad" / "central.db") # NEW
     dxf_library_path: str = str(Path.home() / "ecad" / "dxf_library")
     autosave_path: str = str(Path.home() / "ecad" / "autosave")
+    default_path: str = str(Path.home() / "ecad" / "project")
     recent_files: list = field(default_factory=list)
     max_recent_files: int = 10
     

@@ -25,7 +25,7 @@ class ConnectorItem(QGraphicsRectItem):
         
         # Enable hover events
         self.setAcceptHoverEvents(True)
-
+        self.series = None
         self.cid = ("C"+str(next(self._ids))) if not orcid else orcid
 
         self._label = QGraphicsSimpleTextItem(self.cid, self)

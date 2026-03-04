@@ -301,6 +301,7 @@ class Connector:
     type: ConnectorType
     gender: Gender
     seal: SealType
+    series :str=None
     part_number: Optional[str] = None
     manufacturer: Optional[str] = None
     pins: Dict[str, Pin] = field(default_factory=dict)
