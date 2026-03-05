@@ -85,7 +85,8 @@ class CombinedWireColor:
         
         if self.stripe_color and not GermanWireColors.is_valid_color(self.stripe_color):
             raise ValueError(f"Invalid stripe color code: {stripe_color}")
-    
+    def upper(self):
+        return self.code.upper()
     @property
     def code(self) -> str:
         """Get the combined color code (e.g., 'SW/GE' for black with yellow stripe)"""

@@ -511,7 +511,6 @@ class PropertyEditor(QWidget):
                     connector_item.info.update_text()
     def create_bundle_editor(self, bundle_item):
         """Create editor for bundle properties"""
-        print(bundle_item.end_node,bundle_item.end_item)
         # Header
         header = QLabel(f"Bundle: {bundle_item.bundle_id}")
         header.setStyleSheet("font-weight: bold; padding: 5px;")
@@ -694,7 +693,7 @@ class PropertyEditor(QWidget):
         clear_btn.clicked.connect(lambda: self.clear_bundle_wires(bundle_item))
         actions_layout.addWidget(clear_btn)
         
-        wires_layout.addLayout(actions_layout)
+        # wires_layout.addLayout(actions_layout)
         
         self.content_layout.addWidget(wires_group)
         

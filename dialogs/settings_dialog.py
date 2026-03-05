@@ -391,7 +391,7 @@ class SettingsDialog(QDialog):
         self.db_path.setText(self.settings.database_path)
         self.dxf_path.setText(self.settings.dxf_library_path)
         self.autosave_path.setText(self.settings.autosave_path)
-        self.default_path.setText(str(Path.home() / "ecad" / "projects"))
+        self.default_path.setText(self.settings.default_path)
         
         # Appearance
         theme_map = {
@@ -438,6 +438,7 @@ class SettingsDialog(QDialog):
         self.settings.database_path = self.db_path.text()
         self.settings.dxf_library_path = self.dxf_path.text()
         self.settings.autosave_path = self.autosave_path.text()
+        self.settings.default_path = self.default_path.text()
         
         # Appearance
         theme_map = {0: 'light', 1: 'dark', 2: 'system', 3: 'high_contrast'}

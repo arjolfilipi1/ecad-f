@@ -47,7 +47,20 @@ class ProjectDatabase:
                 value TEXT
             )
         ''')
-        
+        # Branch Points table (NEW)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS branch_points (
+                id TEXT PRIMARY KEY,
+                project_id TEXT,
+                node_id TEXT,
+                position_x REAL,
+                position_y REAL,
+                branch_type TEXT,
+                properties TEXT,
+                created_date TIMESTAMP
+            )
+        ''')
+
         # Connectors
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS connectors (
@@ -499,15 +512,20 @@ class ProjectDatabase:
                 
                 # Get wire IDs for this bundle
                 cursor.execute("SELECT wire_id FROM bundle_wires WHERE bundle_id = ?", (bundle_data['id'],))
-                bundle_data['wire_ids'] = [r['wire_id'] for r in cursor.fetchall()]
+                wire_ids = [r['wire_id'] for r in cursor.fetchall()]
+                bundle_data['wire_ids'] = wire_ids
                 
                 bundles.append(bundle_data)
             
+            print(f"Loaded {len(bundles)} bundles from database")
             return bundles
             
         except Exception as e:
             print(f"Error loading bundles: {e}")
+            import traceback
+            traceback.print_exc()
             return []
+
     
     def _load_connector(self, row) -> Optional[Connector]:
         """Load a connector from database row"""
@@ -636,7 +654,8 @@ class ProjectFileHandler:
         self.current_project = None
         self.current_path = None
         self.modified = False
-    
+    def set_name(self,name):
+        self.current_project.name = name
     def new_project(self, name: str = "New Project") -> WiringHarness:
         """Create a new project"""
         from model.models import WiringHarness
@@ -649,6 +668,11 @@ class ProjectFileHandler:
         """Open a .ecad project file"""
         db = ProjectDatabase(filepath)
         self.current_project = db.load_project()
+        
+        # Also load bundles data separately if needed
+        if hasattr(self, 'bundles_data'):
+            self.bundles_data = db.load_bundles()
+        
         db.close()
         
         if self.current_project:
@@ -657,8 +681,8 @@ class ProjectFileHandler:
         
         return self.current_project
     
-    def save_project(self, filepath: str = None, bundles=None, imported_wires=None) -> bool:
-        """Save project to file"""
+    def save_project(self, filepath: str = None, main_window=None) -> bool:
+        """Save project to file - UPDATED to get bundles from main_window"""
         if not self.current_project:
             return False
         
@@ -670,15 +694,30 @@ class ProjectFileHandler:
         if not save_path.endswith('.ecad'):
             save_path += '.ecad'
         
+        # Get bundles and imported wires from main window
+        bundles = []
+        imported_wires = []
+        
+        if main_window:
+            bundles = getattr(main_window, 'bundles', [])
+            imported_wires = getattr(main_window, 'imported_wire_items', [])
+            print(f"Saving {len(bundles)} bundles and {len(imported_wires)} wires")
+        
         db = ProjectDatabase(save_path)
-        success = db.save_project(self.current_project, bundles, imported_wires)
+        success = db.save_project(
+            self.current_project, 
+            bundles=bundles, 
+            imported_wires=imported_wires
+        )
         db.close()
         
         if success:
             self.current_path = save_path
             self.modified = False
+            print(f"Successfully saved to {save_path}")
         
         return success
+
     
     def export_to_excel(self, filepath: str) -> bool:
         """Export harness data to Excel"""

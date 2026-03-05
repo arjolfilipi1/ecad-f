@@ -107,7 +107,6 @@ class ConnectorItem(QGraphicsRectItem):
         # Find all bundles connected to this node
         if hasattr(self.main_window, 'bundles'):
             for bundle in self.main_window.bundles:
-                print("se",bundle.start_node , self.topology_node , bundle.end_node , self.topology_node)
                 if bundle.start_node == self.topology_node or bundle.end_node == self.topology_node:
                     bundle.update_position_from_nodes()
 

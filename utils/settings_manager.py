@@ -141,9 +141,9 @@ class SettingsManager:
         except Exception as e:
             print(f"Error saving settings: {e}")
     
-    def get(self, key: str, default=None):
+    def get(self, key: str, default=None,end= None):
         """Get a setting value by key"""
-        return getattr(self.settings, key, default)
+        return getattr(self.settings, key, default) + end if end else getattr(self.settings, key, default)
     
     def set(self, key: str, value):
         """Set a setting value and save"""

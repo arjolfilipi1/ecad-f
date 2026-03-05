@@ -19,7 +19,7 @@ class ImportedWire:
     stripe_color: Optional[str] = None
     
     # From side
-    from_device: str = ""
+    from_node_id: str = ""
     from_pin: str = ""
     from_contact: str = ""
     from_seal: str = ""
@@ -27,7 +27,7 @@ class ImportedWire:
     from_tool: str = ""
     
     # To side
-    to_device: str = ""
+    to_node_id: str = ""
     to_pin: str = ""
     to_contact: str = ""
     to_seal: str = ""
@@ -59,14 +59,14 @@ class ExcelHarnessImporter:
         'Material': 'material',
         'Cross_section': 'cross_section',
         'Color': 'color',
-        'From': 'from_device',
+        'From': 'from_node_id',
         'Pin_left': 'from_pin',
         'Contact_left': 'from_contact',
         'Seal_left': 'from_seal',
         'Strip_left': 'from_strip',
         'Adress_left': 'from_address',
         'Tool_left': 'from_tool',
-        'To': 'to_device',
+        'To': 'to_node_id',
         'Pin_right': 'to_pin'
         # Add more columns as needed
     }
@@ -187,15 +187,15 @@ class ExcelHarnessImporter:
                 wire_id = row.get('Position')
                 
                 # Extract from side information
-                from_device = str(row.get('From', '')).strip()
+                from_node_id = str(row.get('From', '')).strip()
                 from_pin = str(row.get('Pin_left', '')).strip()
                 
                 # Extract to side information
-                to_device = str(row.get('To', '')).strip()
+                to_node_id = str(row.get('To', '')).strip()
                 to_pin = str(row.get('Pin_right', '')).strip()
                 
                 # Skip if missing critical information
-                if not from_device or not to_device:
+                if not from_node_id or not to_node_id:
                     self.warnings.append(f"Row {idx}: Missing from/to device")
                     continue
                 
@@ -206,13 +206,13 @@ class ExcelHarnessImporter:
                     cross_section=cross_section,
                     color=base_color,
                     stripe_color=stripe,
-                    from_device=from_device,
+                    from_node_id=from_node_id,
                     from_pin=from_pin,
                     from_contact=str(row.get('Contact_left', '')).strip(),
                     from_seal=str(row.get('Seal_left', '')).strip(),
                     from_strip_length=self.parse_cross_section(row.get('Strip_left', 0)),
                     from_tool=str(row.get('Tool_left', '')).strip(),
-                    to_device=to_device,
+                    to_node_id=to_node_id,
                     to_pin=to_pin,
                     to_contact=str(row.get('Contact_right', '')).strip() if 'Contact_right' in row else '',
                     to_seal=str(row.get('Seal_right', '')).strip() if 'Seal_right' in row else '',
@@ -238,18 +238,18 @@ class ExcelHarnessImporter:
         
         for wire in self.wires:
             # Process from side connector
-            if wire.from_device:
-                if wire.from_device not in connectors:
-                    connectors[wire.from_device] = ImportedConnector(
-                        device_name=wire.from_device,
-                        part_number=self._find_part_number(wire.from_device),
+            if wire.from_node_id:
+                if wire.from_node_id not in connectors:
+                    connectors[wire.from_node_id] = ImportedConnector(
+                        device_name=wire.from_node_id,
+                        part_number=self._find_part_number(wire.from_node_id),
                         pins={}
                     )
                 
                 # Add pin information
                 if wire.from_pin:
-                    if wire.from_pin not in connectors[wire.from_device].pins:
-                        connectors[wire.from_device].pins[wire.from_pin] = {
+                    if wire.from_pin not in connectors[wire.from_node_id].pins:
+                        connectors[wire.from_node_id].pins[wire.from_pin] = {
                             'contact': wire.from_contact,
                             'seal': wire.from_seal,
                             'strip_length': wire.from_strip_length,
@@ -260,18 +260,18 @@ class ExcelHarnessImporter:
                         }
             
             # Process to side connector
-            if wire.to_device:
-                if wire.to_device not in connectors:
-                    connectors[wire.to_device] = ImportedConnector(
-                        device_name=wire.to_device,
-                        part_number=self._find_part_number(wire.to_device),
+            if wire.to_node_id:
+                if wire.to_node_id not in connectors:
+                    connectors[wire.to_node_id] = ImportedConnector(
+                        device_name=wire.to_node_id,
+                        part_number=self._find_part_number(wire.to_node_id),
                         pins={}
                     )
                 
                 # Add pin information
                 if wire.to_pin:
-                    if wire.to_pin not in connectors[wire.to_device].pins:
-                        connectors[wire.to_device].pins[wire.to_pin] = {
+                    if wire.to_pin not in connectors[wire.to_node_id].pins:
+                        connectors[wire.to_node_id].pins[wire.to_pin] = {
                             'contact': wire.to_contact,
                             'seal': wire.to_seal,
                             'strip_length': wire.to_strip_length,
@@ -313,13 +313,13 @@ class ExcelHarnessImporter:
             'wires': [
                 {
                     'id': w.wire_id,
-                    'name': f"{w.from_device}_{w.from_pin}_to_{w.to_device}_{w.to_pin}",
+                    'name': f"{w.from_node_id}_{w.from_pin}_to_{w.to_node_id}_{w.to_pin}",
                     'signal_name': w.signal_name,
                     'cross_section': w.cross_section,
                     'color': w.color,
                     'stripe_color': w.stripe_color,
-                    'from_connection': f"{w.from_device}:{w.from_pin}",
-                    'to_connection': f"{w.to_device}:{w.to_pin}",
+                    'from_connection': f"{w.from_node_id}:{w.from_pin}",
+                    'to_connection': f"{w.to_node_id}:{w.to_pin}",
                     'part_number': w.part_number,
                 }
                 for w in self.wires
@@ -403,8 +403,8 @@ def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_
     main_window.wires = []
     
     for wd in wires:
-        from_conn = created_connectors.get(wd.from_device)
-        to_conn = created_connectors.get(wd.to_device)
+        from_conn = created_connectors.get(wd.from_node_id)
+        to_conn = created_connectors.get(wd.to_node_id)
         
         if not from_conn or not to_conn:
             continue

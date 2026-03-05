@@ -185,7 +185,6 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         
         # Map from scene to this proxy's coordinate system
         local_pos = self.mapFromScene(scene_pos)
-        print(self.size(),self.table.size())
         # Convert to QPoint for QWidget methods
         widget_pos = local_pos.toPoint()
         

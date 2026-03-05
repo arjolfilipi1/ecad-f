@@ -246,7 +246,7 @@ class PublishManager:
             # Publish connectors
             conn_id_map = {} # Map old ID to new published ID
             for conn in harness.connectors.values():
-                pub_conn_id = f"PUB_{conn.id}"
+                pub_conn_id = f"{conn.id}"
                 conn_id_map[conn.id] = pub_conn_id
                 
                 cursor.execute('''
@@ -313,6 +313,13 @@ class PublishManager:
                 for wire_item in imported_wires:
                     if hasattr(wire_item, 'wire_data'):
                         wd = wire_item.wire_data
+                        color = "SW"
+                        if not isinstance(wd.color, str):
+                            if hasattr(wd.color,'code') and callable(wd.color.code):
+                                color = wd.color.code()
+                        else:
+                            color = wd.color
+
                         cursor.execute('''
                             INSERT OR IGNORE INTO published_wires (
                                 id, project_id, wire_name, signal_name,
@@ -324,7 +331,7 @@ class PublishManager:
                             wire_item.wid, project_id, wire_item.wid,
                             wd.signal_name if hasattr(wd, 'signal_name') else '',
                             wd.cross_section if hasattr(wd, 'cross_section') else 0.5,
-                            wd.color if hasattr(wd, 'color') else 'SW',
+                            color,
                             conn_id_map.get(f"CONN_{wd.from_node_id}"),
                             wd.from_pin,
                             conn_id_map.get(f"CONN_{wd.to_node_id}"),
