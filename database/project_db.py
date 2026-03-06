@@ -440,7 +440,7 @@ class ProjectDatabase:
         """Load a project from database"""
         try:
             cursor = self.conn.cursor()
-            
+            print(self.conn,"connection")
             # Load project info
             cursor.execute("SELECT key, value FROM project_info")
             info = {row['key']: row['value'] for row in cursor.fetchall()}

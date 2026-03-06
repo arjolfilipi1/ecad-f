@@ -24,8 +24,8 @@ class WireItem(QGraphicsPathItem):
         self.is_connected = True
         
         # Connect to pins
-        start_pin.wires.append(self)
-        end_pin.wires.append(self)
+        start_pin.add_wire(self)
+        end_pin.add_wire(self)
         
         # Reference for topology
         self.main_window = None
@@ -149,10 +149,10 @@ class WireItem(QGraphicsPathItem):
             self.tree_item = None
         
         # Remove from pins
-        if self.start_pin and self in self.start_pin.wires:
-            self.start_pin.wires.remove(self)
-        if self.end_pin and self in self.end_pin.wires:
-            self.end_pin.wires.remove(self)
+        if self.start_pin and self in self.start_pin.wire_items:
+            self.start_pin.wire_items.remove(self)
+        if self.end_pin and self in self.end_pin.wire_items:
+            self.end_pin.wire_items.remove(self)
 
     def __del__(self):
         """Ensure cleanup on deletion"""

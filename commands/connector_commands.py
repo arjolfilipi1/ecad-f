@@ -12,7 +12,8 @@ class AddConnectorCommand(BaseCommand):
         self.pos = pos
         self.main_window = main_window
         main_window.conns.append(connector_item)
-        self.connector_id = connector_item.cid
+        main_window.wiringharness.add_connector(connector_item.model)
+        self.connector_id = connector_item.model.id
         self.pin_count = len(connector_item.pins)
     
     def redo(self):
@@ -26,6 +27,7 @@ class AddConnectorCommand(BaseCommand):
         # Add to main window lists
         if hasattr(self.main_window, 'conns'):
             self.main_window.conns.append(self.connector)
+        self.main_window.wiringharness.add_connector(self.connector.model)
         # Setup info table if not already done
         if not hasattr(self.connector, 'info_table') or not self.connector.info_table:
             self.connector.setup_info_table()
@@ -69,23 +71,20 @@ class DeleteConnectorCommand(CompoundCommand):
         self.scene = scene
         self.main_window = main_window
         self.connector = connector_item
-        self.connector_id = connector_item.cid
-        self.original_pos = connector_item.pos()
         self.wire_commands = []
         # Store connector data for recreation
-        self.pin_ids = connector_item.pin_ids
+        self.pin_ids = [x for x in connector_item.model.pins]
         self.pins_data = []  # Store pin wire connections
-        self.rotation_angle = connector_item.rotation_angle
         # Store which wires were connected to which pins
         for pin in connector_item.pins:
-            wire_ids = [w.wid if hasattr(w, 'wid') else getattr(w, 'wire', object()).id 
-                       for w in pin.wires if w]
+            wires = [w.wid if hasattr(w, 'wid') else getattr(w, 'wire', object()).id 
+                       for w in pin.wire_items if w]
             self.pins_data.append({
                 'pin_id': pin.original_id or pin.pid,
-                'wire_ids': wire_ids
+                'wire_ids': wires
             })
             # Find all connected wires and create delete commands for them
-            for wire in list(pin.wires):
+            for wire in list(pin.wire_items):
                 from commands.wire_commands import DeleteWireCommand
                 self.add_command(DeleteWireCommand(scene, wire, main_window))
         
@@ -95,7 +94,7 @@ class DeleteConnectorCommand(CompoundCommand):
         self.properties = {
             'part_number': getattr(connector_item, 'part_number', None),
             'manufacturer': getattr(connector_item, 'manufacturer', None),
-            'name': connector_item.cid
+
         }
     
     def redo(self):
@@ -116,13 +115,9 @@ class DeleteConnectorCommand(CompoundCommand):
         # Recreate connector
         from graphics.connector_item import ConnectorItem
         new_connector = ConnectorItem(
-            self.original_pos.x(),
-            self.original_pos.y(),
-            pins=self.pin_ids
+            self.connector.model
         )
-        new_connector.cid = self.connector_id
-        new_connector.rotation_angle = self.rotation_angle
-        new_connector.setRotation(self.rotation_angle)
+        new_connector.setRotation(self.connector.model.rotation)
         
         # Restore properties
         for key, value in self.properties.items():
@@ -138,11 +133,12 @@ class DeleteConnectorCommand(CompoundCommand):
         # Add to scene
         self.scene.addItem(new_connector)
         self.main_window.conns.append(new_connector)
+        self.main_window.wiringharness.add_connector(new_connector.model)
         
         # Recreate tree item
-        item = QTreeWidgetItem([new_connector.cid])
+        item = QTreeWidgetItem([new_connector.model.id])
         item.setData(0, Qt.UserRole, new_connector)
-        self.main_window.connectors_tree.addTopLevelItem(item)
+        self.main_window.objects_dock.connectors_tree.addTopLevelItem(item)
         new_connector.tree_item = item
         
         self.connector = new_connector

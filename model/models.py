@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 import math
 import uuid
-
+from itertools import count
 class GermanWireColor(NamedTuple):
     """Standard German automotive wire colors with RGB values"""
     code: str  # Standard abbreviation
@@ -214,13 +214,19 @@ class Fastener:
 @dataclass
 class Pin:
     """Represents a single cavity/pin within a connector."""
+    pid: str
     number: str
     gender: Gender
     seal: SealType
     wire_id: Optional[str] = None
     description: Optional[str] = None
     current_rating: Optional[float] = None  # Amps
-    
+    def is_used(self) -> bool:
+        return self.wire_id is not None
+    def add_wire(self,wire):
+        if not self.wire_id:
+            self.wire_id = []
+        self.wire_id.append(wire)
     def to_dict(self) -> dict:
         return {
             'number': self.number,
@@ -308,6 +314,7 @@ class Connector:
     pins: Dict[str, Pin] = field(default_factory=dict)
     position: Tuple[float, float] = (0.0, 0.0)
     description: Optional[str] = None
+    rotation: int = 0
     
     @property
     def wire_count(self) -> int:
@@ -466,6 +473,7 @@ class HarnessBranch:
 
 @dataclass
 class WiringHarness:
+    _ids = count(0)
     """The top-level object representing the entire harness."""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = "New Harness"
@@ -491,7 +499,8 @@ class WiringHarness:
     def add_branch(self, branch: HarnessBranch) -> None:
         self.branches[branch.id] = branch
         self.modified_date = datetime.now()
-    
+    def next_cid(self)-> str:
+        return "C"+str(next(self._ids))
     def to_dict(self) -> dict:
         return {
             'id': self.id,

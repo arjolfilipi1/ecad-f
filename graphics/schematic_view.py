@@ -7,7 +7,8 @@ from .pin_item import PinItem
 from PyQt5.QtCore import Qt, QPointF, QLineF
 from .connector_item import ConnectorItem
 from enum import Enum
-
+from typing import Union, List,Optional
+from model.models import Connector,ConnectorType,Gender,SealType,Pin
 class Tool(Enum):
     SELECT = 0
     ADD_CONNECTOR = 1
@@ -163,6 +164,39 @@ class SchematicView(QGraphicsView):
             self.tool_group.addAction(a)
 
         self.act_select.setChecked(True)
+    def _create_model(self, x: float, y: float, pins_spec: Union[int, List[str]],orcid= None,type=None,gender=None,seal=None) -> Connector:
+        """Create the Connector model instance"""
+        if isinstance(pins_spec, int):
+            pin_count = pins_spec
+            pin_ids = [str(i+1) for i in range(pin_count)]
+        else:
+            pin_ids = pins_spec.copy()
+            pin_count = len(pin_ids)
+        
+        # Create pin models
+        pins_dict = {}
+        # Create connector ID
+        connector_id = orcid if orcid else self.parent.wiringharness.next_cid()
+        for pin_id in pin_ids:
+            pin = Pin(
+                pid = str(connector_id)+"_" + str(pin_id),
+                number=pin_id,
+                gender=Gender.FEMALE,
+                seal=SealType.UNSEALED
+            )
+            pins_dict[pin_id] = pin
+        
+        
+        # Create and return model
+        return Connector(
+            id=connector_id,
+            name=connector_id,
+            type=ConnectorType.OTHER,
+            gender=Gender.FEMALE,
+            seal=SealType.UNSEALED,
+            pins=pins_dict,
+            position=(x, y)
+        )
     def mousePressEvent(self, event):
         """Handle mouse press for panning and other tools"""
         if event.button() == Qt.MiddleButton:
@@ -179,15 +213,16 @@ class SchematicView(QGraphicsView):
         if event.button() == Qt.LeftButton:
             if self.current_tool == Tool.ADD_CONNECTOR:
                 # Add connector
-                c = ConnectorItem(pos.x(), pos.y(), pins=[1, 2])
+                model = self._create_model(pos.x(), pos.y(), pins_spec=[1, 2])
+                c = ConnectorItem(model = model)
                 c.set_topology_manager(self.parent.topology_manager)
                 c.set_main_window(self.parent)
                 c.create_topology_node()
                 
                 # Add to tree
-                item = QTreeWidgetItem([c.cid])
+                item = QTreeWidgetItem([c.model.id])
                 item.setData(0, Qt.UserRole, c)
-                self.parent.connectors_tree.addTopLevelItem(item)
+                self.parent.objects_dock.connectors_tree.addTopLevelItem(item)
                 c.tree_item = item
                 
                 # Add with undo

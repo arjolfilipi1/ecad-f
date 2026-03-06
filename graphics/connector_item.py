@@ -6,11 +6,12 @@ from .pin_item import PinItem
 from itertools import count
 from typing import Union, List,Optional
 from PyQt5 import sip
+from model.models import Connector,ConnectorType,Gender,SealType,Pin
 
 class ConnectorItem(QGraphicsRectItem):
-    _ids = count(0)
     
-    def __init__(self, x: float, y: float, pins: Union[int, List[str]] = 2,orcid:str = ""):
+    
+    def __init__(self,model:Connector):
         """
         Args:
             x, y: position
@@ -25,16 +26,10 @@ class ConnectorItem(QGraphicsRectItem):
         
         # Enable hover events
         self.setAcceptHoverEvents(True)
-        self.series = None
-        self.cid = ("C"+str(next(self._ids))) if not orcid else orcid
-
-        self._label = QGraphicsSimpleTextItem(self.cid, self)
-        self.pins = []
-        self.pin_ids = []  # Store original pin identifiers
-        self.tree_item = None
-        self.rotation_angle = 0
-        self.wires = []
-        self.bundles = []
+        self.pins:[PinItem] = []
+        self.model = model
+        self._label = QGraphicsSimpleTextItem(self.model.id, self)
+        self.tree_item = None     
         self.main_window = None
         self.topology_manager = None
         self.topology_node = None
@@ -49,7 +44,7 @@ class ConnectorItem(QGraphicsRectItem):
         self.setPen(self.normal_pen)
 
         self.setTransformOriginPoint(0, 0)
-        self.setPos(x, y)
+        self.setPos(self.model.position[0], self.model.position[1])
         
         self._label.setFlag(QGraphicsItem.ItemIgnoresTransformations)
         self.update_label_pos()
@@ -57,11 +52,12 @@ class ConnectorItem(QGraphicsRectItem):
         self._is_hovered = False
 
         # Create pins based on input
-        self._create_pins(pins)
+        
+        self._create_pins_from_model()
         from graphics.connector_info_table import ConnectorInfoTable
         self.info_table = ConnectorInfoTable(self)
         self.compact_mode = False
-        self.info = ConnectorInfoItem(self)
+
         self.shadow = QGraphicsDropShadowEffect()
         self.setup_info_table()
         # 2. Configure properties
@@ -97,11 +93,11 @@ class ConnectorItem(QGraphicsRectItem):
     def get_node(self):
         return self.topology_node
     def __str__(self):
-        return self.cid
+        return self.model.id
     def _update_connected_bundles(self):
         """Update all bundles connected to this connector"""
         if not self.topology_node:
-            print("no topology node")
+            # print("no topology node")
             return
         
         # Find all bundles connected to this node
@@ -110,36 +106,26 @@ class ConnectorItem(QGraphicsRectItem):
                 if bundle.start_node == self.topology_node or bundle.end_node == self.topology_node:
                     bundle.update_position_from_nodes()
 
-    def _create_pins(self, pins_spec: Union[int, List[str]]):
-        """Create pin items from specification"""
+    
+    
+    def _create_pins_from_model(self):
+        """Create pin graphics items from the model"""
         self.pins.clear()
-        self.pin_ids.clear()
-        
-        if isinstance(pins_spec, int):
-            # Legacy mode: generate sequential pin numbers
-            pin_count = pins_spec
-            self.pin_ids = [str(i+1) for i in range(pin_count)]
-        else:
-            # List of pin identifiers (strings)
-            self.pin_ids = pins_spec.copy()
-            pin_count = len(self.pin_ids)
         
         # Position pins vertically on left side
+        pin_count = len(self.model.pins)
         spacing = 20 / (pin_count + 1)
-        for i, pin_id in enumerate(self.pin_ids):
-            pin = PinItem(
-                f"{self.cid}_{pin_id}",  # e.g., "C0_A1"
-                QPointF(-20, -10 + spacing * (i + 1)),
-                self
-            )
-            # Store the original pin identifier for lookup
-            pin.original_id = pin_id
+        
+        for i, (pin_number, pin_model) in enumerate(self.model.pins.items()):
+            offset = QPointF(-20, -10 + spacing * (i + 1))
+            pin = PinItem(pin_model, offset, self)
             self.pins.append(pin)
+
     
     def get_pin_by_id(self, pin_id: str) -> Optional[PinItem]:
         """Find pin by its original identifier (e.g., 'A1', '3')"""
         for pin in self.pins:
-            if hasattr(pin, 'original_id') and pin.original_id == pin_id:
+            if hasattr(pin, 'model') and pin.model.pid == pin_id:
                 return pin
         return None
 
@@ -158,7 +144,7 @@ class ConnectorItem(QGraphicsRectItem):
         if self.topology_manager:
             from model.topology import TopologyNode
             self.topology_node = TopologyNode(
-                f"CONN_{self.cid}", 
+                self.model.id, 
                 (self.pos().x(), self.pos().y())
             )
             self.topology_manager.nodes[self.topology_node.id] = self.topology_node
@@ -190,11 +176,11 @@ class ConnectorItem(QGraphicsRectItem):
             # Update topology node position
             if self.topology_node:
                 self.topology_node.position = (self.pos().x(), self.pos().y())
-            
+            self.model.position = [self.pos().x(),self.pos().y()]
             # Update pins
             for pin in self.pins:
                 pin.invalidate_cache()
-                for wire in list(pin.wires):
+                for wire in list(pin.wire_items):
                     if hasattr(wire, 'update_path'):
                         wire.update_path()
             
@@ -207,15 +193,14 @@ class ConnectorItem(QGraphicsRectItem):
             # Update label
             self.update_label_pos()
             
-            if hasattr(self, 'info'):
-                self.info.update_text()
-            if hasattr(self, 'info_table'):
+
+            if hasattr(self, 'info_table') and self.info_table is not None:
                 self.info_table.update_table()
         elif change == self.ItemRotationHasChanged:
             # Handle rotation
             self._update_pin_positions_after_rotation()
             for pin in self.pins:
-                for wire in list(pin.wires):
+                for wire in list(pin.wire_items):
                     if hasattr(wire, 'update_path'):
                         wire.update_path()
             self._update_connected_segments()
@@ -266,15 +251,15 @@ class ConnectorItem(QGraphicsRectItem):
     
     def rotate_90(self):
         """Rotate connector by 90 degrees"""
-        self.rotation_angle = (self.rotation_angle + 90) % 360
-        self.setRotation(self.rotation_angle)
+        self.model.rotation = (self.model.rotation + 90) % 360
+        self.setRotation(self.model.rotation)
         
         # Force update of pin positions
         self._update_pin_positions_after_rotation()
         
         # Update wires
         for pin in self.pins:
-            for wire in list(pin.wires):
+            for wire in list(pin.wire_items):
                 wire.update_path()
     def update_label_pos(self):
         self._label.setPos(
@@ -347,9 +332,10 @@ class ConnectorItem(QGraphicsRectItem):
             pin.cleanup()
         
         # Clear wire references
-        for wire in list(self.wires):
-            if wire in self.wires:
-                self.wires.remove(wire)
+        for wire in list(self.model.pins.values()):
+            # This would need proper wire tracking
+            pass
+
         # CRITICAL: Clean up info table
         if hasattr(self, 'info_table') and self.info_table:
             try:
@@ -369,27 +355,3 @@ class ConnectorItem(QGraphicsRectItem):
             # Position it correctly
             self.info_table.setPos(25, -15)
 
-
-class ConnectorInfoItem(QGraphicsTextItem):
-    def __init__(self, connector):
-        super().__init__(connector)
-        self.connector = connector
-
-        self.setFont(QFont("Consolas", 8))
-        self.setDefaultTextColor(Qt.darkGray)
-        self.setFlag(self.ItemIgnoresTransformations)  # stays readable
-        self.setZValue(10)
-
-        self.setPos(25, -15)  # offset to the right of connector
-        self.update_text()
-
-    def update_text(self):
-        lines = [f"{self.connector.cid}"]
-        self.connector._label.setText(self.connector.cid)
-        for pin in self.connector.pins:
-            
-            wids = [w.wid for w in pin.wires]
-            net_name = ",".join(wids) if pin.wires else "—"
-            lines.append(f"{pin.pid}: {net_name}")
-
-        self.setPlainText("\n".join(lines))

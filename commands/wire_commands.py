@@ -21,8 +21,8 @@ class AddWireCommand(BaseCommand):
             return
         
         self.scene.addItem(self.wire)
-        self.from_pin.wires.append(self.wire)
-        self.to_pin.wires.append(self.wire)
+        self.from_pin.add_wire(self.wire)
+        self.to_pin.add_wire(self.wire)
         
         # Add to main window lists
         if hasattr(self.main_window, 'wires'):
@@ -34,10 +34,10 @@ class AddWireCommand(BaseCommand):
     
     def undo(self):
         self.scene.removeItem(self.wire)
-        if self.wire in self.from_pin.wires:
-            self.from_pin.wires.remove(self.wire)
-        if self.wire in self.to_pin.wires:
-            self.to_pin.wires.remove(self.wire)
+        if self.wire in self.from_pin.model.wire_id:
+            self.from_pin.model.wire_id.remove(self.wire)
+        if self.wire in self.to_pin.model.wire_id:
+            self.to_pin.model.wire_id.remove(self.wire)
         
         # Remove from main window lists
         if hasattr(self.main_window, 'wires') and self.wire in self.main_window.wires:
@@ -83,10 +83,10 @@ class DeleteWireCommand(BaseCommand):
         self.scene.removeItem(self.wire)
         
         # Remove from pins
-        if self.wire in self.from_pin.wires:
-            self.from_pin.wires.remove(self.wire)
-        if self.wire in self.to_pin.wires:
-            self.to_pin.wires.remove(self.wire)
+        if self.wire in self.from_pin.wire_items:
+            self.from_pin.wire_items.remove(self.wire)
+        if self.wire in self.to_pin.wire_items:
+            self.to_pin.wire_items.remove(self.wire)
         
         # Remove from main window lists
         if hasattr(self.main_window, 'wires') and self.wire in self.main_window.wires:
@@ -110,8 +110,8 @@ class DeleteWireCommand(BaseCommand):
         new_wire.net = self.net
         
         self.scene.addItem(new_wire)
-        self.from_pin.wires.append(new_wire)
-        self.to_pin.wires.append(new_wire)
+        self.from_pin.wire_items.append(new_wire)
+        self.to_pin.wire_items.append(new_wire)
         
         # Create NEW tree item (don't try to reuse old one)
         item = QTreeWidgetItem([self.tree_item_text or new_wire.wid])

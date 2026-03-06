@@ -94,8 +94,8 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         
     def update_table(self):
         """Update the table with current pin information"""
-        pins = self.connector.pins
-        
+        pins = self.connector.model.pins
+
         # Remember current column widths
         col0_width = self.table.columnWidth(0)
         col2_width = self.table.columnWidth(2)
@@ -108,15 +108,16 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         
         # Populate rows
         max_wire_length = 0
-        for row, pin in enumerate(pins):
+        for row,pin_data in enumerate(pins.items()):
+            nr , pin = pin_data
             # Pin number
-            pin_item = QTableWidgetItem(pin.pid)
+            pin_item = QTableWidgetItem(str(pin.number))
             pin_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 0, pin_item)
             
             # Wire ID
-            if pin.wires:
-                wire = pin.wires[0]
+            if pin.wire_id:
+                wire = pin.wire_id[0]
                 wire_id = wire.wid if hasattr(wire, 'wid') else str(wire)
                 
                 wire_item = QTableWidgetItem(wire_id)
@@ -139,16 +140,16 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
             self.table.setItem(row, 1, wire_item)
             
             # Color
-            if pin.wires and hasattr(pin.wires[0], 'color_data'):
-                color_code = pin.wires[0].color_data.code
+            if pin.wire_id and hasattr(pin.wire_id[0], 'color_data'):
+                color_code = pin.wire_id[0].color_data.code
                 color_item = QTableWidgetItem(color_code)
                 
                 # Show actual color in background
-                color = QColor(*pin.wires[0].color_data.rgb)
+                color = QColor(*pin.wire_id[0].color_data.rgb)
                 color_item.setBackground(QBrush(color))
                 
                 # Set text color for contrast
-                if pin.wires[0].color_data.rgb[0] + pin.wires[0].color_data.rgb[1] + pin.wires[0].color_data.rgb[2] < 384:
+                if pin.wire_id[0].color_data.rgb[0] + pin.wire_id[0].color_data.rgb[1] + pin.wire_id[0].color_data.rgb[2] < 384:
                     color_item.setForeground(QBrush(Qt.white))
             else:
                 color_item = QTableWidgetItem("—")

@@ -53,7 +53,7 @@ class PropertyEditor(QWidget):
         self.no_selection.hide()
         
         # Determine item type and create appropriate editor
-        if hasattr(item, 'cid'):  # ConnectorItem
+        if hasattr(item, 'node_type') and item.node_type == "Connector":  # ConnectorItem
             self.current_type = 'connector'
             self.create_connector_editor(item)
         elif hasattr(item, 'wid'):  # WireItem
@@ -99,7 +99,7 @@ class PropertyEditor(QWidget):
         """Create editor for connector properties"""
         
         # Header
-        header = QLabel(f"Connector: {connector_item.cid}")
+        header = QLabel(f"Connector: {connector_item.model.id}")
         header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         
@@ -108,7 +108,7 @@ class PropertyEditor(QWidget):
         basic_layout = QFormLayout(basic_group)
         
         # ID (read-only)
-        id_edit = QLineEdit(connector_item.cid)
+        id_edit = QLineEdit(connector_item.model.id)
         id_edit.setReadOnly(True)
         basic_layout.addRow("ID:", id_edit)
         
@@ -183,7 +183,7 @@ class PropertyEditor(QWidget):
         # Rotation
         rot_spin = QSpinBox()
         rot_spin.setRange(0, 359)
-        rot_spin.setValue(int(connector_item.rotation_angle))
+        rot_spin.setValue(int(connector_item.model.rotation))
         rot_spin.valueChanged.connect(lambda v: self.on_property_change('rotation', v))
         pos_layout.addRow("Rotation:", rot_spin)
         
@@ -192,8 +192,7 @@ class PropertyEditor(QWidget):
         # Pins group
         pins_group = QGroupBox(f"Pins ({len(connector_item.pins)})")
         pins_layout = QVBoxLayout(pins_group)
-        
-        for pin in connector_item.pins:
+        for nr,pin in connector_item.model.pins.items():
             pin_widget = self.create_pin_editor(pin)
             pins_layout.addWidget(pin_widget)
         
@@ -247,13 +246,13 @@ class PropertyEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         
         # Pin ID
-        id_label = QLabel(pin.pid)
+        id_label = QLabel(str(pin.pid))
         id_label.setMinimumWidth(60)
         layout.addWidget(id_label)
         
         # Wire ID (if connected)
-        if pin.wires:
-            wire_label = QLabel(f"→ {pin.wires[0].wid}")
+        if pin.wire_id:
+            wire_label = QLabel(f"→ {pin.wire_id[0].wid}")
             wire_label.setStyleSheet("color: green;")
             layout.addWidget(wire_label)
         else:
@@ -314,11 +313,11 @@ class PropertyEditor(QWidget):
         conn_layout = QFormLayout(conn_group)
         
         # From
-        from_label = QLabel(f"{wire_item.start_pin.pid}")
+        from_label = QLabel(f"{wire_item.start_pin.model.pid}")
         conn_layout.addRow("From:", from_label)
         
         # To
-        to_label = QLabel(f"{wire_item.end_pin.pid}")
+        to_label = QLabel(f"{wire_item.end_pin.model.pid}")
         conn_layout.addRow("To:", to_label)
         
         self.content_layout.addWidget(conn_group)
@@ -428,9 +427,8 @@ class PropertyEditor(QWidget):
             
             # Apply change immediately (for visual feedback)
             setattr(self.current_item, property_name, value)
-            
             # Create undo command
-            if hasattr(self.current_item, 'cid'):  # Connector
+            if hasattr(self.current_item, 'node_type') and self.current_item.node_type == "Connector":  # Connector
                 from commands.connector_commands import UpdateConnectorPropertiesCommand
                 cmd = UpdateConnectorPropertiesCommand(
                     self.current_item,
@@ -568,7 +566,7 @@ class PropertyEditor(QWidget):
             start_node_text = s[:16] + "..." if len(s) > 16 else s
             # start_node_text = str(bundle_item.start_item)[:16] + "..."
             # elif hasattr(bundle_item.start_item,'cid'):
-                # start_node_text = bundle_item.start_item.cid[:16] + "..."
+                # start_node_text = bundle_item.start_item.model.id[:16] + "..."
         self.bundle_start_node = QLabel(start_node_text)
         nodes_layout.addRow("Start Node:", self.bundle_start_node)
         
@@ -579,7 +577,7 @@ class PropertyEditor(QWidget):
             s = str(bundle_item.end_item)
             end_node_text = s[:16] + "..." if len(s) > 16 else s
             # elif hasattr(bundle_item.end_item,'cid'):
-                # end_node_text = bundle_item.end_item.cid[:16] + "..."
+                # end_node_text = bundle_item.end_item.model.id[:16] + "..."
         self.bundle_end_node = QLabel(end_node_text)
         nodes_layout.addRow("End Node:", self.bundle_end_node)
         
@@ -648,8 +646,8 @@ class PropertyEditor(QWidget):
                             color_text = wire.color_data.code
                         
                         # Get from→to info
-                        from_pin = f"{wire.start_pin.parent.cid}:{wire.start_pin.original_id}"
-                        to_pin = f"{wire.end_pin.parent.cid}:{wire.end_pin.original_id}"
+                        from_pin = f"{wire.start_pin.parent.model.id}:{wire.start_pin.original_id}"
+                        to_pin = f"{wire.end_pin.parent.model.id}:{wire.end_pin.original_id}"
                         from_to_text = f"{from_pin} → {to_pin}"
                         break
             

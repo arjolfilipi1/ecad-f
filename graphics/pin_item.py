@@ -2,20 +2,20 @@
 from PyQt5.QtWidgets import QGraphicsEllipseItem, QGraphicsItem
 from PyQt5.QtCore import QPointF,Qt
 from PyQt5.QtGui import QBrush, QTransform, QPen, QColor
+from model.models import Pin
+from typing import  Optional
+
 
 class PinItem(QGraphicsEllipseItem):
-    def __init__(self, pid, offset: QPointF, parent,pos =""):
+    def __init__(self,  pin_model: Pin, offset: QPointF, parent):
         super().__init__(-3, -3, 6, 6, parent)
-        self.pid = pid  # e.g., "C0_A1"
-        self.original_id = None  # will be set by connector
+        self.model = pin_model
         self.node_type = "Pin"
-        self.pos = pos
         self.offset = offset  # Position RELATIVE to parent connector
-        self.wires = []
         self.cached_scene_pos = None
         self.topology_connection = None
         self.parent = parent
-        
+        self.wire_items = []
         # CRITICAL: Set local position relative to parent
         self.setPos(offset)  # This is LOCAL position within parent coordinate system
         # Remove default selection
@@ -42,12 +42,42 @@ class PinItem(QGraphicsEllipseItem):
         
         # Store initial position
         self.update_scene_position()
+        
+
+    def add_wire(self, wire):
+        self.model.add_wire(wire)#change to wire.model later
+        self.wire_items.append(wire)
+    @property
+    def pid(self) -> str:
+        """Get pin identifier"""
+        return f"{self.parent.cid}_{self.model.number}"
+
+    @property
+    def original_id(self) -> str:
+        """Get original pin number"""
+        return self.model.number
+
+    @original_id.setter
+    def original_id(self, value: str):
+        """Set original pin number (updates model)"""
+        self.model.number = value
+        
+    # ============ Model synchronization ============
+
+    def get_wire_id(self) -> Optional[str]:
+        """Get wire ID connected to this pin"""
+        return self.model.wire_id
+    
+    def set_wire_id(self, wire_id: Optional[str]):
+        """Set wire ID connected to this pin"""
+        self.model.wire_id = wire_id
+
+        
     def paint(self, painter, option, widget=None):
         """Custom paint for pin with glow effects"""
         painter.save()
         
-        # Determine if pin has connected wires
-        has_wires = len(self.wires) > 0
+
         
         # Set visual style based on state
         if self.isSelected():
@@ -108,5 +138,5 @@ class PinItem(QGraphicsEllipseItem):
         return self.offset
     def cleanup(self):
         """Clean up pin references"""
-        self.wires.clear()
         self.topology_connection = None
+        self.model.wire_id = None

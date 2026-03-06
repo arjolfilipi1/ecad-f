@@ -92,31 +92,33 @@ class PublishManager:
         
         # Published wires
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS published_wires (
-                id TEXT PRIMARY KEY,
-                project_id TEXT,
-                wire_name TEXT,
-                signal_name TEXT,
-                wire_type TEXT,
-                cross_section REAL,
-                base_color TEXT,
-                stripe_color TEXT,
-                from_connector_id TEXT,
-                from_pin TEXT,
-                to_connector_id TEXT,
-                to_pin TEXT,
-                length_mm REAL,
-                part_number TEXT,
-                FOREIGN KEY (project_id) REFERENCES published_projects(id),
-                FOREIGN KEY (from_connector_id) REFERENCES published_connectors(id),
-                FOREIGN KEY (to_connector_id) REFERENCES published_connectors(id)
-            )
+           CREATE TABLE IF NOT EXISTS published_wires (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wid TEXT,
+            project_id TEXT,
+            wire_name TEXT,
+            signal_name TEXT,
+            wire_type TEXT,
+            cross_section REAL,
+            base_color TEXT,
+            stripe_color TEXT,
+            from_connector_id TEXT,
+            from_pin TEXT,
+            to_connector_id TEXT,
+            to_pin TEXT,
+            length_mm REAL,
+            part_number TEXT,
+            FOREIGN KEY (project_id) REFERENCES published_projects(id),
+            FOREIGN KEY (from_connector_id) REFERENCES published_connectors(id),
+            FOREIGN KEY (to_connector_id) REFERENCES published_connectors(id)
+        )
         ''')
         
         # Published bundles
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS published_bundles (
-                id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bid TEXT,
                 project_id TEXT,
                 name TEXT,
                 start_node_id TEXT,
@@ -135,7 +137,8 @@ class PublishManager:
         # Published segments
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS published_segments (
-                id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sid TEXT,
                 project_id TEXT,
                 name TEXT,
                 start_node_id TEXT,
@@ -291,7 +294,7 @@ class PublishManager:
                 
                 cursor.execute('''
                     INSERT INTO published_wires (
-                        id, project_id, wire_name, signal_name, wire_type,
+                        wid, project_id, wire_name, signal_name, wire_type,
                         cross_section, base_color, stripe_color,
                         from_connector_id, from_pin, to_connector_id, to_pin,
                         length_mm, part_number
@@ -322,7 +325,7 @@ class PublishManager:
 
                         cursor.execute('''
                             INSERT OR IGNORE INTO published_wires (
-                                id, project_id, wire_name, signal_name,
+                                wid, project_id, wire_name, signal_name,
                                 cross_section, base_color,
                                 from_connector_id, from_pin, to_connector_id, to_pin,
                                 length_mm, part_number
@@ -361,7 +364,7 @@ class PublishManager:
                     
                     cursor.execute('''
                         INSERT INTO published_bundles (
-                            id, project_id, name,
+                            bid, project_id, name,
                             start_node_id, end_node_id,
                             start_point_x, start_point_y,
                             end_point_x, end_point_y,
@@ -382,7 +385,7 @@ class PublishManager:
             for segment in harness.branches.values():
                 cursor.execute('''
                     INSERT INTO published_segments (
-                        id, project_id, name, start_node_id, end_node_id,
+                        sid, project_id, name, start_node_id, end_node_id,
                         path_points, wire_ids
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', (

@@ -26,7 +26,7 @@ class TopologyManager:
     def create_connector_node(self, connector) -> TopologyNode:
         """Create a topology node for a connector"""
         node = TopologyNode(
-            node_id=f"CONN_{connector.cid}",
+            node_id=connector.model.id,
             position=(connector.pos().x(), connector.pos().y())
         )
         node.node_type = "connector"
