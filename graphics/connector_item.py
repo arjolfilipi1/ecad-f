@@ -23,11 +23,12 @@ class ConnectorItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setFlag(QGraphicsItem.ItemIsFocusable, True)  # For hover events
-        
+
         # Enable hover events
         self.setAcceptHoverEvents(True)
         self.pins:[PinItem] = []
         self.model = model
+        self.model.graphics_item = self  # Set reverse reference
         self._label = QGraphicsSimpleTextItem(self.model.id, self)
         self.tree_item = None     
         self.main_window = None
@@ -248,7 +249,22 @@ class ConnectorItem(QGraphicsRectItem):
                 for wire in segment.wires:
                     if hasattr(wire, 'graphics_item'):
                         wire.graphics_item.update_path()
-    
+    def setRotation(self, angle: float) -> None:
+        """
+        Override setRotation to also update the model's rotation.
+        
+        Args:
+            angle: Rotation angle in degrees
+        """
+        # Call the parent class method
+        super().setRotation(angle)
+        
+        # Update the model's rotation
+        if hasattr(self, 'model') and self.model:
+            self.model.rotation = angle
+            
+        # Update pins and connected elements
+        self._update_pin_positions_after_rotation()
     def rotate_90(self):
         """Rotate connector by 90 degrees"""
         self.model.rotation = (self.model.rotation + 90) % 360
@@ -313,10 +329,10 @@ class ConnectorItem(QGraphicsRectItem):
         self._is_hovered = False
         self.update()
         super().hoverLeaveEvent(event)
+    
     def cleanup(self):
-        """Remove tree item references before deletion"""
+        """Remove references before deletion"""
         if self.tree_item:
-            # Remove from tree widget
             try:
                 tree = self.tree_item.treeWidget()
                 if tree and not sip.isdeleted(tree):
@@ -327,19 +343,17 @@ class ConnectorItem(QGraphicsRectItem):
                 pass
             self.tree_item = None
         
+        # Clear graphics item reference from model
+        if self.model:
+            self.model.graphics_item = None
+        
         # Clear pin references
         for pin in self.pins:
             pin.cleanup()
         
-        # Clear wire references
-        for wire in list(self.model.pins.values()):
-            # This would need proper wire tracking
-            pass
-
-        # CRITICAL: Clean up info table
+        # Clean up info table
         if hasattr(self, 'info_table') and self.info_table:
             try:
-                # Remove from scene if it's a graphics item
                 if self.info_table.scene():
                     self.scene().removeItem(self.info_table)
                 self.info_table.deleteLater()

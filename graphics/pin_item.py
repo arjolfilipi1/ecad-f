@@ -10,6 +10,7 @@ class PinItem(QGraphicsEllipseItem):
     def __init__(self,  pin_model: Pin, offset: QPointF, parent):
         super().__init__(-3, -3, 6, 6, parent)
         self.model = pin_model
+        self.model.graphics_item = self  # Set reverse reference
         self.node_type = "Pin"
         self.offset = offset  # Position RELATIVE to parent connector
         self.cached_scene_pos = None
@@ -136,7 +137,11 @@ class PinItem(QGraphicsEllipseItem):
     def get_local_offset(self):
         """Get the offset relative to connector center"""
         return self.offset
+    
     def cleanup(self):
         """Clean up pin references"""
         self.topology_connection = None
         self.model.wire_id = None
+        # Clear graphics item reference from model
+        if self.model:
+            self.model.graphics_item = None

@@ -113,14 +113,14 @@ class ConnectorContextMenu(QMenu):
     
     def rotate_left(self):
         """Rotate connector 90 degrees counter-clockwise"""
-        old_angle = self.connector.rotation_angle
+        old_angle = self.connector.model.rotation
         self.connector.rotate_90()  # This rotates right by default
         
         from commands.connector_commands import RotateConnectorCommand
         cmd = RotateConnectorCommand(
             self.connector,
             old_angle,
-            self.connector.rotation_angle
+            self.connector.model.rotation
         )
         self.main_window.undo_manager.push(cmd)
     
@@ -128,10 +128,10 @@ class ConnectorContextMenu(QMenu):
         """Rotate connector 90 degrees clockwise"""
         # For right rotation, we can call rotate_90 three times for left?
         # Better to implement direct rotation
-        old_angle = self.connector.rotation_angle
-        new_angle = (old_angle + 90) % 360
+        old_angle = self.connector.model.rotation
+        new_angle = (old_angle - 90) % 360
         self.connector.setRotation(new_angle)
-        self.connector.rotation_angle = new_angle
+        self.connector.model.rotation = new_angle
         
         from commands.connector_commands import RotateConnectorCommand
         cmd = RotateConnectorCommand(self.connector, old_angle, new_angle)

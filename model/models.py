@@ -7,6 +7,7 @@ from datetime import datetime
 import math
 import uuid
 from itertools import count
+
 class GermanWireColor(NamedTuple):
     """Standard German automotive wire colors with RGB values"""
     code: str  # Standard abbreviation
@@ -121,6 +122,7 @@ class CombinedWireColor:
     
     def __str__(self) -> str:
         return self.code
+        
 class ConnectorType(Enum):
     JT = "Junior Timer"
     GT = "General Timer"
@@ -129,7 +131,6 @@ class ConnectorType(Enum):
     DTP = "Deutsch DTP"
     SQUARE = "Square Connector"
     OTHER = "Other"
-
 
 class SealType(Enum):
     UNSEALED = "Unsealed"
@@ -140,7 +141,6 @@ class Gender(Enum):
     MALE = "Male"
     FEMALE = "Female"
 
-
 class WireType(Enum):
     FLRY_B_0_35 = "FLRY-B 0.35 mm²"
     FLRY_B_0_5 = "FLRY-B 0.5 mm²"
@@ -148,7 +148,6 @@ class WireType(Enum):
     FLRY_B_1_0 = "FLRY-B 1.0 mm²"
     FLRY_B_1_5 = "FLRY-B 1.5 mm²"
     FLRY_B_2_5 = "FLRY-B 2.5 mm²"
-
 
 class ProtectionType(Enum):
     BRAIDED_SLEEVE = "Braided Sleeve (PET)"
@@ -158,14 +157,12 @@ class ProtectionType(Enum):
     TAPE = "Friction Tape"
     FABRIC_TAPE = "Fabric Tape"
 
-
 class NodeType(Enum):
     CONNECTOR = "CONNECTOR"
     SPLICE = "SPLICE"
     GROUND = "GROUND"
     TERMINAL = "TERMINAL"
     BREAKOUT = "BREAKOUT"
-
 
 class FastenerCategory(Enum):
     CLIP = "Clip"
@@ -221,12 +218,17 @@ class Pin:
     wire_id: Optional[str] = None
     description: Optional[str] = None
     current_rating: Optional[float] = None  # Amps
+    graphics_item: Optional[any] = None
+    
     def is_used(self) -> bool:
         return self.wire_id is not None
+        
     def add_wire(self,wire):
+        print(self.wire_id)
         if not self.wire_id:
             self.wire_id = []
         self.wire_id.append(wire)
+        
     def to_dict(self) -> dict:
         return {
             'number': self.number,
@@ -264,6 +266,7 @@ class Wire:
     part_number: Optional[str] = None
     notes: Optional[str] = None
     cross_section:Optional[float] = None
+    graphics_item: Optional[any] = None
     
     def to_dict(self) -> dict:
         return {
@@ -315,6 +318,7 @@ class Connector:
     position: Tuple[float, float] = (0.0, 0.0)
     description: Optional[str] = None
     rotation: int = 0
+    graphics_item: Optional[any] = None
     
     @property
     def wire_count(self) -> int:
@@ -371,6 +375,7 @@ class Node:
     type: NodeType
     connector_id: Optional[str] = None
     position: Tuple[float, float] = (0.0, 0.0)
+    graphics_item: Optional[any] = None
     
     def to_dict(self) -> dict:
         return {
@@ -434,6 +439,7 @@ class HarnessBranch:
     path_points: List[Tuple[float, float]] = field(default_factory=list)
     node_ids: List[str] = field(default_factory=list)  # List of node IDs on this branch
     wire_ids: List[str] = field(default_factory=list)  # Wires in this branch
+    graphics_item: Optional[any] = None
     
     def calculate_length(self) -> float:
         """Calculate total length of the branch."""

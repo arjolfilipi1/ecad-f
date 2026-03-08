@@ -348,114 +348,140 @@ class ExcelHarnessImporter:
 def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_route=False):
     """
     Import Excel data into topology system
-    
-    Args:
-        filepath: Excel file path
-        topology_manager: TopologyManager instance
-        main_window: MainWindow reference
-        auto_route: If True, create full topology with branches
-                    If False, create minimal connectors and wires only
     """
     importer = ExcelHarnessImporter(filepath)
     if not importer.load_excel():
         return False
     
     importer.clean_dataframe()
-    wires = importer.extract_wires()
-    connectors = importer.extract_connectors()
-    # Store import data for later routing
-    main_window.imported_wires_data = wires  # ← Rename to avoid confusion
-    main_window.imported_connectors = connectors
+    wires_data = importer.extract_wires()
+    connectors_data = importer.extract_connectors()
     
-    created_connectors = {}
+    # Store import data for later routing
+    main_window.imported_wires_data = wires_data
+    main_window.imported_connectors = connectors_data
+    
     x_pos, y_pos = 100, 100
     
-    # 1. CREATE CONNECTORS
-    for device_name, conn_data in connectors.items():
+    # 1. CREATE CONNECTOR MODELS AND GRAPHICS
+    for device_name, conn_data in connectors_data.items():
         pin_ids = list(conn_data.pins.keys())
         pin_ids.sort()
         
-        connector = ConnectorItem(x_pos, y_pos, pins=pin_ids)
-        connector.cid = device_name
+        # Create pin models
+        pins_dict = {}
+        for pin_id in pin_ids:
+            pin = Pin(
+                pid=f"{device_name}_{pin_id}",
+                number=pin_id,
+                gender=Gender.FEMALE,
+                seal=SealType.UNSEALED
+            )
+            pins_dict[pin_id] = pin
         
-        # Setup topology minimally
+        # Create connector model
+        connector_model = Connector(
+            id=device_name,
+            name=device_name,
+            type=ConnectorType.OTHER,
+            gender=Gender.FEMALE,
+            seal=SealType.UNSEALED,
+            pins=pins_dict,
+            position=(x_pos, y_pos)
+        )
+        
+        # Add to harness
+        main_window.wiringharness.add_connector(connector_model)
+        
+        # Create graphics item
+        connector = ConnectorItem(connector_model)
         connector.set_topology_manager(topology_manager)
         connector.set_main_window(main_window)
         connector.create_topology_node()
         
         main_window.scene.addItem(connector)
-        created_connectors[device_name] = connector
         
         x_pos += 200
         if x_pos > 800:
             x_pos = 100
             y_pos += 200
     
-    # 2. CREATE WIRES - SINGLE CREATION, SINGLE STORAGE
-    from graphics.wire_item import WireItem
+    # 2. CREATE WIRE MODELS AND GRAPHICS
     from model.netlist import Netlist
     
     netlist = Netlist()
     topology_manager.set_netlist(netlist)
     
-    # Clear any existing wire lists
-    main_window.imported_wire_items = []
-    main_window.wires = []
-    
-    for wd in wires:
-        from_conn = created_connectors.get(wd.from_node_id)
-        to_conn = created_connectors.get(wd.to_node_id)
+    for wd in wires_data:
+        # Find connector models
+        from_conn_model = main_window.wiringharness.connectors.get(wd.from_node_id)
+        to_conn_model = main_window.wiringharness.connectors.get(wd.to_node_id)
         
-        if not from_conn or not to_conn:
+        if not from_conn_model or not to_conn_model:
             continue
         
-        from_pin = from_conn.get_pin_by_id(wd.from_pin)
-        to_pin = to_conn.get_pin_by_id(wd.to_pin)
+        # Find pin models
+        from_pin_model = from_conn_model.pins.get(wd.from_pin)
+        to_pin_model = to_conn_model.pins.get(wd.to_pin)
         
-        if not from_pin or not to_pin:
+        if not from_pin_model or not to_pin_model:
             continue
         
-        # Create net
-        net = netlist.connect(from_pin, to_pin)
+        # Get graphics items
+        from_conn_graphics = from_conn_model.graphics_item
+        to_conn_graphics = to_conn_model.graphics_item
         
-        # CREATE DIRECT WIRE - ONLY ONCE
-        wire = WireItem(
-            wd.wire_id,
-            from_pin,
-            to_pin,
-            wd.color,
-            net
+        if not from_conn_graphics or not to_conn_graphics:
+            continue
+        
+        from_pin_graphics = from_conn_graphics.get_pin_by_id(from_pin_model.pid)
+        to_pin_graphics = to_conn_graphics.get_pin_by_id(to_pin_model.pid)
+        
+        # Determine wire type
+        if wd.cross_section <= 0.35:
+            wire_type = WireType.FLRY_B_0_35
+        elif wd.cross_section <= 0.5:
+            wire_type = WireType.FLRY_B_0_5
+        elif wd.cross_section <= 0.75:
+            wire_type = WireType.FLRY_B_0_75
+        elif wd.cross_section <= 1.0:
+            wire_type = WireType.FLRY_B_1_0
+        elif wd.cross_section <= 1.5:
+            wire_type = WireType.FLRY_B_1_5
+        else:
+            wire_type = WireType.FLRY_B_2_5
+        
+        # Create wire model
+        wire_model = Wire(
+            id=wd.wire_id,
+            harness_id=main_window.wiringharness.id,
+            type=wire_type,
+            color=CombinedWireColor(wd.color, wd.stripe_color),
+            from_node_id=wd.from_node_id,
+            to_node_id=wd.to_node_id,
+            from_pin=wd.from_pin,
+            to_pin=wd.to_pin,
+            signal_name=wd.signal_name,
+            part_number=wd.part_number,
+            cross_section=wd.cross_section
         )
         
-        # Store all data in the wire object
-        wire.wire_data = wd
+        # Add to harness
+        main_window.wiringharness.add_wire(wire_model)
+        
+        # Create net
+        net = netlist.connect(from_pin_model.pid, to_pin_model.pid)
+        
+        # Create wire graphics
+        wire = WireItem(wire_model)
+        wire.connect_to_pins(from_pin_graphics, to_pin_graphics)
         wire.net = net
         
-        # Add to scene
         main_window.scene.addItem(wire)
-        
-        # Connect to pins
-        # from_pin.wires.append(wire)
-        # to_pin.wires.append(wire)
-        
-        # STORE IN EXACTLY ONE LIST for later routing
-        main_window.imported_wire_items.append(wire)
-        # DO NOT also store in main_window.wires - that's for routed wires
-        
-    # Store connectors for tree view
-    main_window.conns = list(created_connectors.values())
-    
-    # IMPORTANT: Clear wires list - it should only contain ROUTED wires, not direct wires
-    main_window.wires = []
-    
-    # Refresh tree views - but only show connectors, not direct wires
-    main_window.refresh_connector_labels()
-    main_window.refresh_tree_views()  # ← Modify this to not show direct wires
     
     print(f"\n=== IMPORT COMPLETE ===")
-    print(f"Connectors: {len(created_connectors)}")
-    print(f"Direct Wires: {len(main_window.imported_wire_items)}")
-    print(f"Auto-route: {auto_route}")
+    print(f"Connectors: {len(main_window.wiringharness.connectors)}")
+    print(f"Wires: {len(main_window.wiringharness.wires)}")
     
     return True
 

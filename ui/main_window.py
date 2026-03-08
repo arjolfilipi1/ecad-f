@@ -72,11 +72,11 @@ class MainWindow(QMainWindow):
         self.update_dispatcher.connector_rotated.connect(self.on_connector_moved)
         
         # Data containers
-        self.conns = []
-        self.wires = []
+        # self.conns = []
+        # self.wires = []
         self.bundles = []
-        self.imported_wire_items = []
-        self.routed_wire_items = []
+        # self.imported_wire_items = []
+        # self.routed_wire_items = []
         self.moving_connector = None
         
         
@@ -87,6 +87,39 @@ class MainWindow(QMainWindow):
         # Final setup
         self.refresh_connector_labels()
         self.statusBar().showMessage("Loading complete...", 0)
+        
+     # Add helper properties for backward compatibility during transition
+    
+    @property
+    def conns(self):
+        """Get all connector graphics items from the harness"""
+        return [conn.graphics_item for conn in self.wiringharness.connectors.values() 
+                if conn.graphics_item is not None]
+    
+    @property
+    def imported_wire_items(self):
+        """Get all imported wire graphics items from the harness"""
+        return [wire.graphics_item for wire in self.wiringharness.wires.values() 
+                if wire.graphics_item is not None and 
+                hasattr(wire.graphics_item, 'is_connected') and 
+                wire.graphics_item.is_connected]
+    
+    @property
+    def routed_wire_items(self):
+        """Get all routed wire graphics items"""
+        # This might need to be stored separately or in the topology manager
+        if hasattr(self, '_routed_wire_items'):
+            return self._routed_wire_items
+        return []
+    
+    @routed_wire_items.setter
+    def routed_wire_items(self, value):
+        self._routed_wire_items = value
+    
+    @property
+    def wires(self):
+        """Get all wire models (for backward compatibility)"""
+        return list(self.wiringharness.wires.values())
     def export_to_excel(self):
         """ tbd """
         pass
@@ -359,15 +392,22 @@ class MainWindow(QMainWindow):
     
     def refresh_connector_labels(self):
         """Refresh all connector info labels"""
-        for item in self.conns:
-            if isinstance(item, ConnectorItem):
-                item.info.update_text()
-                item.info_table.update_table()
-    
+        for conn in self.wiringharness.connectors.values():
+            if conn.graphics_item:
+                if hasattr(conn.graphics_item, 'info'):
+                    conn.graphics_item.info.update_text()
+                if hasattr(conn.graphics_item, 'info_table'):
+                    conn.graphics_item.info_table.update_table()
+                    
     def refresh_tree_views(self):
         """Refresh tree widget contents"""
         if hasattr(self.objects_dock, 'connectors_tree'):
-            self.objects_dock.refresh_trees(self.conns, self.get_all_wires())
+            # Get all connectors from harness
+            connectors = [conn.graphics_item for conn in self.wiringharness.connectors.values() 
+                         if conn.graphics_item is not None]
+            wires = [wire.graphics_item for wire in self.wiringharness.wires.values() 
+                    if wire.graphics_item is not None]
+            self.objects_dock.refresh_trees(connectors, wires)
     
     def refresh_bundle_tree(self):
         """Refresh the bundles tree with wire counts"""
@@ -409,12 +449,9 @@ class MainWindow(QMainWindow):
     
     def get_all_wires(self):
         """Get all wire items (both imported and routed)"""
-        wire_items = []
-        if hasattr(self, 'routed_wire_items'):
-            wire_items.extend(self.routed_wire_items)
-        if hasattr(self, 'imported_wire_items'):
-            wire_items.extend(self.imported_wire_items)
-        return wire_items
+        """Get all wire graphics items from harness"""
+        return [wire.graphics_item for wire in self.wiringharness.wires.values() if wire.graphics_item is not None]
+
     
     # ============ Action Methods ============
     
@@ -651,8 +688,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Launch Failed", f"Failed to launch connector manager:\n{str(e)}")
     
     def log_to_console(self):
-        print(self.conns)
-        print(self.wiringharness.connectors)
+        print(self.wiringharness)
         
     def show_settings(self):
         """Show settings dialog"""
@@ -732,30 +768,36 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'bundles_tree'):
             self.bundles_tree.clear()
         
-        for conn in self.conns:
-            conn.cleanup()
-        self.conns.clear()
+        # Clean up all graphics items
+        for conn in self.wiringharness.connectors.values():
+            if conn.graphics_item:
+                conn.graphics_item.cleanup()
         
-        if hasattr(self, 'imported_wire_items'):
-            for wire in self.imported_wire_items:
-                wire.cleanup()
-            self.imported_wire_items.clear()
+        for wire in self.wiringharness.wires.values():
+            if wire.graphics_item:
+                wire.graphics_item.cleanup()
         
-        if hasattr(self, 'routed_wire_items'):
-            for wire in self.routed_wire_items:
-                wire.cleanup()
-            self.routed_wire_items.clear()
+        # Clear the harness
+        self.wiringharness.connectors.clear()
+        self.wiringharness.wires.clear()
         
+        # Clear routed wires if any
+        if hasattr(self, '_routed_wire_items'):
+            for wire in self._routed_wire_items:
+                if wire.scene():
+                    self.scene.removeItem(wire)
+            self._routed_wire_items.clear()
+        
+        # Clear topology
+        self.topology_manager.nodes.clear()
+        self.topology_manager.segments.clear()
+        self.topology_manager.wires.clear()
+        
+        # Clear bundles
         if hasattr(self, 'bundles'):
             for bundle in self.bundles:
                 bundle.cleanup()
             self.bundles.clear()
-        
-        self.wires.clear()
-        
-        self.topology_manager.nodes.clear()
-        self.topology_manager.segments.clear()
-        self.topology_manager.wires.clear()
         
         self.scene.clear()
     

@@ -11,6 +11,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 
 from graphics.wire_item import WireItem
+from model.models import Wire, CombinedWireColor, WireType
 from model.netlist import Netlist
 from utils.excel_import import ImportedWire
 
@@ -216,33 +217,29 @@ class WiresTab(QWidget):
         
         conn = self.from_connector_combo.currentData()
         if conn and hasattr(conn.model, 'pins'):
-            for i,pin in conn.model.pins.items():
-                # is_used = len(pin.wires) > 0
-                display_text = str(pin.number)
-                if hasattr(pin, 'original_id') and pin.original_id:
-                    display_text = str(pin.original_id)
+            for pin_number, pin_model in conn.model.pins.items():
+                display_text = str(pin_model.number)
                 
-                if pin.is_used():
+                # Check if pin is used by looking at wire_id in the model
+                if pin_model.wire_id:
                     display_text += " (used)"
                 
-                self.from_pin_combo.addItem(display_text, pin)
+                self.from_pin_combo.addItem(display_text, pin_model)
     
     def update_to_pins(self):
         """Update to pin combo box based on selected connector"""
         self.to_pin_combo.clear()
         
         conn = self.to_connector_combo.currentData()
-        if conn and hasattr(conn, 'pins'):
-            for i,pin in conn.model.pins.items():
-                # is_used = len(pin.wires) > 0
-                display_text = str(pin.number)
-                if hasattr(pin, 'original_id') and pin.original_id:
-                    display_text = str(pin.original_id)
+        if conn and hasattr(conn.model, 'pins'):
+            for pin_number, pin_model in conn.model.pins.items():
+                display_text = str(pin_model.number)
                 
-                if pin.is_used():
+                # Check if pin is used by looking at wire_id in the model
+                if pin_model.wire_id:
                     display_text += " (used)"
                 
-                self.to_pin_combo.addItem(display_text, pin)
+                self.to_pin_combo.addItem(display_text, pin_model)
     
     def update_color_preview(self, color_text):
         """Update color preview based on selected color"""
@@ -261,12 +258,14 @@ class WiresTab(QWidget):
         """Create a new wire between selected connectors and pins"""
         from_conn = self.from_connector_combo.currentData()
         to_conn = self.to_connector_combo.currentData()
-        from_pin = self.from_pin_combo.currentData()
-        to_pin = self.to_pin_combo.currentData()
-        from_pin_item = from_conn.get_pin_by_id(from_pin.pid)
-        to_pin_item = to_conn.get_pin_by_id(to_pin.pid)
+        from_pin_model = self.from_pin_combo.currentData()
+        to_pin_model = self.to_pin_combo.currentData()
+        
+        # Get the actual pin graphics items
+        from_pin_item = from_conn.get_pin_by_id(from_pin_model.pid)
+        to_pin_item = to_conn.get_pin_by_id(to_pin_model.pid)
        
-        if not from_conn or not to_conn or not from_pin or not to_pin:
+        if not from_conn or not to_conn or not from_pin_model or not to_pin_model:
             QMessageBox.warning(self, "Invalid Selection", 
                                "Please select both connectors and pins")
             return
@@ -276,58 +275,106 @@ class WiresTab(QWidget):
                                "From and To connectors cannot be the same")
             return
         
+        # Generate wire ID
         wire_count = len(self.main_window.imported_wire_items) if hasattr(self.main_window, 'imported_wire_items') else 0
         wire_id = f"W{wire_count + 1}"
         
         signal_name = self.wire_signal.text() or f"Signal_{wire_id}"
-        color = self.wire_color.currentText()
+        color_code = self.wire_color.currentText()
         cross_section = self.wire_cross_section.value()
         part_number = self.wire_part_number.text() or None
         
+        # Create the wire model
+        from model.models import Wire, CombinedWireColor, WireType
+        
+        # Determine wire type based on cross section
+        if cross_section <= 0.35:
+            wire_type = WireType.FLRY_B_0_35
+        elif cross_section <= 0.5:
+            wire_type = WireType.FLRY_B_0_5
+        elif cross_section <= 0.75:
+            wire_type = WireType.FLRY_B_0_75
+        elif cross_section <= 1.0:
+            wire_type = WireType.FLRY_B_1_0
+        elif cross_section <= 1.5:
+            wire_type = WireType.FLRY_B_1_5
+        else:
+            wire_type = WireType.FLRY_B_2_5
+        
+        wire_model = Wire(
+            id=wire_id,
+            harness_id=self.main_window.wiringharness.id,
+            type=wire_type,
+            color=CombinedWireColor(color_code),
+            from_node_id=from_conn.model.id,
+            to_node_id=to_conn.model.id,
+            from_pin=from_pin_model.number,
+            to_pin=to_pin_model.number,
+            signal_name=signal_name,
+            part_number=part_number,
+            cross_section=cross_section
+        )
+        
+        # Add wire model to harness
+        self.main_window.wiringharness.add_wire(wire_model)
+        
+        # Create net
+        netlist = Netlist()
+        self.main_window.topology_manager.set_netlist(netlist)
+        net = netlist.connect(from_pin_model.pid, to_pin_model.pid)
+        
+        # Create wire graphics item from model
+        wire_item = WireItem(wire_model)
+        wire_item.connect_to_pins(from_pin_item, to_pin_item)
+        wire_item.net = net
+        wire_item.main_window = self.main_window
+        
+        # Add to scene
+        self.main_window.scene.addItem(wire_item)
+        
+        # Store in main window lists
+        if not hasattr(self.main_window, 'imported_wire_items'):
+            self.main_window.imported_wire_items = []
+        self.main_window.imported_wire_items.append(wire_item)
+        
+        # Create ImportedWire for backward compatibility if needed
         wire_data = ImportedWire(
             wire_id=wire_id,
             part_number=part_number,
             cross_section=cross_section,
-            color=color,
+            color=color_code,
             from_node_id=from_conn.model.id,
-            from_pin=from_pin.original_id if hasattr(from_pin, 'original_id') else from_pin.pid,
+            from_pin=from_pin_model.number,
             to_node_id=to_conn.model.id,
-            to_pin=to_pin.original_id if hasattr(to_pin, 'original_id') else to_pin.pid,
+            to_pin=to_pin_model.number,
             signal_name=signal_name
         )
-        
-        netlist = Netlist()
-        self.main_window.topology_manager.set_netlist(netlist)
-        net = netlist.connect(from_pin.pid, to_pin.pid)
-        
-        wire = WireItem(wire_id, from_pin_item, to_pin_item, color, net)
-        wire.wire_data = wire_data
-        wire.net = net
-        wire.signal_name = signal_name
-        wire.cross_section = cross_section
-        
-        self.main_window.scene.addItem(wire)
-        
-        if not hasattr(self.main_window, 'imported_wire_items'):
-            self.main_window.imported_wire_items = []
-        self.main_window.imported_wire_items.append(wire)
         
         if not hasattr(self.main_window, 'imported_wires_data'):
             self.main_window.imported_wires_data = []
         self.main_window.imported_wires_data.append(wire_data)
         
+        # Create undo command
         from commands.wire_commands import AddWireCommand
-        cmd = AddWireCommand(self.main_window.scene, wire, from_pin_item, to_pin_item, main_window=self.main_window)
+        cmd = AddWireCommand(
+            self.main_window.scene, 
+            wire_item, 
+            from_pin_item, 
+            to_pin_item, 
+            main_window=self.main_window
+        )
         self.main_window.undo_manager.push(cmd)
         
-
+        # Update connector info tables
         from_conn.info_table.update_table()
         to_conn.info_table.update_table()
         
+        # Refresh views
         self.main_window.refresh_tree_views()
         self.toggle_wire_input()
         self.main_window.statusBar().showMessage(f"Wire {wire_id} created successfully", 3000)
         
+        # Ask about routing through bundles
         if hasattr(self.main_window, 'bundles') and self.main_window.bundles:
             reply = QMessageBox.question(
                 self,
@@ -337,7 +384,7 @@ class WiresTab(QWidget):
             )
             
             if reply == QMessageBox.Yes:
-                self.route_single_wire_through_bundles(wire, wire_data)
+                self.route_single_wire_through_bundles(wire_item, wire_data)
     
     def route_single_wire_through_bundles(self, wire_item, wire_data):
         """Route a single wire through existing bundles"""
@@ -362,7 +409,7 @@ class WiresTab(QWidget):
                 self.main_window.routed_wire_items = []
             self.main_window.routed_wire_items.extend(routed_wires)
             
-            self.main_window.wires = [item.wire for item in self.main_window.routed_wire_items if hasattr(item, 'wire')]
+            self.main_window.wires = [item.model for item in self.main_window.routed_wire_items if hasattr(item, 'model')]
             self.main_window.statusBar().showMessage(f"Wire routed through bundles", 3000)
             
             if hasattr(self.main_window, 'viz_manager'):

@@ -11,30 +11,29 @@ from model.models import CombinedWireColor
 from PyQt5 import sip
 
 class WireItem(QGraphicsPathItem):
-    def __init__(self, wid, start_pin, end_pin, color_txt="SW", net=None):
+    def __init__(self, model: Wire):
+        """
+        Create a wire graphics item from a Wire model.
+        
+        Args:
+            model: The Wire model object containing all wire data
+        """
         super().__init__()
-        self.wid = wid
+        self.model = model
         self.node_type = "Wire"
-        self.start_pin = start_pin  # This is a PinItem!
-        self.end_pin = end_pin      # This is a PinItem!
+        self.model.graphics_item = self  # Set reverse reference
         self.tree_item = None
-        self.color_data = CombinedWireColor(color_txt)
-        self.color = QColor(*self.color_data.rgb)
-        self.setFlag(self.ItemIsSelectable)
-        self.is_connected = True
-        
-        # Connect to pins
-        start_pin.add_wire(self)
-        end_pin.add_wire(self)
-        
-        # Reference for topology
         self.main_window = None
         
+        # Get pin references from the model
+        self.start_pin = None  # Will be set later by the scene
+        self.end_pin = None    # Will be set later by the scene
+        self.is_connected = False
         
-        # Remove default selection
-        self.setFlag(self.ItemIsSelectable, True)
-        self.setFlag(self.ItemIsFocusable, True)
-        self.setAcceptHoverEvents(True)
+        # Color data
+        self.color_data = model.color
+        self.color = QColor(*self.color_data.rgb)
+        
         # Visual properties
         self.normal_pen = QPen(self.color, 2)
         self.hover_pen = QPen(QColor(255, 255, 0), 3)
@@ -43,22 +42,57 @@ class WireItem(QGraphicsPathItem):
         self.setPen(self.normal_pen)
         self.setZValue(1)
         
-        self._is_hovered = False
-        # Initial path
-        self.net = net
-        self.update_path()
+        # Enable interactions
+        self.setFlag(self.ItemIsSelectable, True)
+        self.setFlag(self.ItemIsFocusable, True)
+        self.setAcceptHoverEvents(True)
         
+        self._is_hovered = False
+        
+        # Path will be updated when pins are connected
+        self.update_path()
+    
+    @property
+    def wid(self) -> str:
+        """Get wire ID from model"""
+        return self.model.id
+    
+    def connect_to_pins(self, start_pin, end_pin):
+        """
+        Connect this wire to actual pin graphics items.
+        This should be called after adding to scene.
+        
+        Args:
+            start_pin: The start PinItem
+            end_pin: The end PinItem
+        """
+        self.start_pin = start_pin
+        self.end_pin = end_pin
+        self.is_connected = True
+        
+        # Add this wire to the pins' wire lists
+        start_pin.add_wire(self)
+        end_pin.add_wire(self)
+        
+        # Update pin models with wire ID
+        start_pin.model.add_wire(self.model)
+        end_pin.model.add_wire(self.model)
+        
+        # Update the path
+        self.update_path()
+    
     def contextMenuEvent(self, event):
+        """Handle right-click context menu"""
         from graphics.context_menus import WireContextMenu
         self.setSelected(True)
         menu = WireContextMenu(self, self.main_window)
         menu.exec_(event.screenPos())
-        
+    
     def update_path(self):
-        """Update wire path connecting the TWO PIN POSITIONS"""
-        if not self.is_connected:
+        """Update wire path connecting the two pins"""
+        if not self.is_connected or not self.start_pin or not self.end_pin:
             return
-            
+        
         # Get current pin positions (FORCE recalculation)
         p1 = self.start_pin.update_scene_position()
         p2 = self.end_pin.update_scene_position()
@@ -68,7 +102,6 @@ class WireItem(QGraphicsPathItem):
             self.is_connected = False
             return
         
-
         # Create path with proper elbow routing
         path = QPainterPath(p1)
         
@@ -92,9 +125,19 @@ class WireItem(QGraphicsPathItem):
         
         self.setPath(path)
         
-        # Update visual style
-        pen = QPen(self.color, 2)
-        self.setPen(pen)
+        # Update pen color (in case it changed)
+        self.color = QColor(*self.color_data.rgb)
+        self.normal_pen.setColor(self.color)
+        self.update_appearance()
+    
+    def update_appearance(self):
+        """Update pen based on selection/hover state"""
+        if self.isSelected():
+            self.setPen(self.selected_pen)
+        elif self._is_hovered:
+            self.setPen(self.hover_pen)
+        else:
+            self.setPen(self.normal_pen)
     
     def paint(self, painter, option, widget=None):
         """Custom paint with glow effects and no selection rectangle"""
@@ -102,18 +145,8 @@ class WireItem(QGraphicsPathItem):
         painter.setRenderHint(QPainter.Antialiasing)
         
         # Set pen based on state
-        if self.isSelected():
-            pen = QPen(self.selected_pen)
-            pen.setWidth(3)
-            painter.setPen(pen)
-        elif self._is_hovered:
-            pen = QPen(self.hover_pen)
-            pen.setWidth(3)
-            painter.setPen(pen)
-        else:
-            pen = QPen(self.normal_pen)
-            pen.setWidth(2)
-            painter.setPen(pen)
+        self.update_appearance()
+        painter.setPen(self.pen())
         
         painter.drawPath(self.path())
         painter.restore()
@@ -129,31 +162,24 @@ class WireItem(QGraphicsPathItem):
         self._is_hovered = False
         self.update()
         super().hoverLeaveEvent(event)
+    
     def cleanup(self):
         """Clean up wire references before deletion"""
-        # CRITICAL: Remove tree item reference FIRST
-        if self.tree_item:
-            # Disconnect any signals
-            try:
-                tree = self.tree_item.treeWidget()
-                if tree and not sip.isdeleted(tree):
-                    # Remove from tree safely
-                    index = tree.indexOfTopLevelItem(self.tree_item)
-                    if index >= 0:
-                        tree.takeTopLevelItem(index)
-            except RuntimeError:
-                # Tree widget already deleted, ignore
-                pass
-            
-            # Set to None to break reference
-            self.tree_item = None
-        
-        # Remove from pins
+        # Remove from pins' wire_items lists
         if self.start_pin and self in self.start_pin.wire_items:
             self.start_pin.wire_items.remove(self)
+        
         if self.end_pin and self in self.end_pin.wire_items:
             self.end_pin.wire_items.remove(self)
-
+        
+        # Remove tree item reference (don't try to remove from tree here,
+        # as the tree might be in the process of being cleared)
+        self.tree_item = None
+        
+        # Clear graphics item reference from model
+        if hasattr(self, 'model') and self.model:
+            self.model.graphics_item = None
+        
     def __del__(self):
         """Ensure cleanup on deletion"""
         try:
@@ -162,141 +188,159 @@ class WireItem(QGraphicsPathItem):
             pass
 
 
-
-                    
-
 class SegmentedWireItem(QGraphicsPathItem):
     """Visual representation of a wire that goes through topology"""
-    def __init__(self, wire: Wire):
+    
+    def __init__(self, model: Wire):
+        """
+        Create a segmented wire graphics item from a Wire model.
+        
+        Args:
+            model: The Wire model object
+        """
         super().__init__()
-        self.wire = wire
+        self.model = model
         self.setFlag(self.ItemIsSelectable)
-        self.setZValue(2)  # Wires above segments
         self.main_window = None
         self.node_type = "Wire segment"
-         # Visual properties
-        self.color = QColor(*wire.color_data.rgb)
+        self.tree_item = None
+        
+        # Visual properties
+        self.color_data = model.color
+        self.color = QColor(*self.color_data.rgb)
         self.normal_pen = QPen(self.color, 1.5)
         self.hover_pen = QPen(QColor(255, 255, 0), 2.5)
         self.selected_pen = QPen(QColor(0, 120, 255), 2.5)
         
         self.setPen(self.normal_pen)
-
-        self._is_hovered = False
         self.setZValue(4)
+        
+        self._is_hovered = False
+        self.used_bundles = []  # Bundles this wire passes through
+        
+        # Path will be updated when segments are available
         self.update_path()
     
+    @property
+    def wid(self) -> str:
+        """Get wire ID from model"""
+        return self.model.id
+    
     def contextMenuEvent(self, event):
+        """Handle right-click context menu"""
         from graphics.context_menus import WireContextMenu
         self.setSelected(True)
         menu = WireContextMenu(self, self.main_window)
         menu.exec_(event.screenPos())
-
-
+    
+    def set_main_window(self, window):
+        """Set reference to main window"""
+        self.main_window = window
+    
+    def update_path(self):
+        """Draw the complete path of the wire through segments"""
+        if not hasattr(self.model, 'segments') or not self.model.segments:
+            # Fallback to direct connection if pins are available
+            self._draw_direct_path()
+            return
+        
+        path = QPainterPath()
+        first_point = True
+        
+        # Get from pin position if available
+        if self.model.from_pin and hasattr(self.model.from_pin, 'scene_position'):
+            start_pos = self.model.from_pin.scene_position()
+            path.moveTo(start_pos)
+            first_point = False
+        
+        # Add all segment paths
+        for segment in self.model.segments:
+            if segment.start_node and segment.end_node:
+                p1 = QPointF(*segment.start_node.position)
+                p2 = QPointF(*segment.end_node.position)
+                
+                if first_point:
+                    path.moveTo(p1)
+                    first_point = False
+                
+                path.lineTo(p2)
+        
+        # Connect to end pin if available
+        if self.model.to_pin and hasattr(self.model.to_pin, 'scene_position'):
+            end_pos = self.model.to_pin.scene_position()
+            if not first_point:
+                path.lineTo(end_pos)
+        
+        self.setPath(path)
+        
+        # Update color
+        self.color = QColor(*self.color_data.rgb)
+        self.normal_pen.setColor(self.color)
+        self.update_appearance()
+    
+    def _draw_direct_path(self):
+        """Fallback: draw direct Manhattan path between pins"""
+        if (not self.model.from_pin or not self.model.to_pin or
+            not hasattr(self.model.from_pin, 'scene_position') or
+            not hasattr(self.model.to_pin, 'scene_position')):
+            return
+        
+        p1 = self.model.from_pin.scene_position()
+        p2 = self.model.to_pin.scene_position()
+        
+        path = QPainterPath(p1)
+        
+        # Manhattan routing
+        dx = p2.x() - p1.x()
+        dy = p2.y() - p1.y()
+        
+        if abs(dx) > abs(dy):
+            mid_x = p1.x() + dx * 0.5
+            path.lineTo(mid_x, p1.y())
+            path.lineTo(mid_x, p2.y())
+            path.lineTo(p2)
+        else:
+            mid_y = p1.y() + dy * 0.5
+            path.lineTo(p1.x(), mid_y)
+            path.lineTo(p2.x(), mid_y)
+            path.lineTo(p2)
+        
+        self.setPath(path)
+    
+    def update_appearance(self):
+        """Update pen based on selection/hover state"""
+        if self.isSelected():
+            self.setPen(self.selected_pen)
+        elif self._is_hovered:
+            self.setPen(self.hover_pen)
+        else:
+            self.setPen(self.normal_pen)
+    
     def paint(self, painter, option, widget=None):
         """Custom paint with glow effects"""
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         
-        if self.isSelected():
-            pen = QPen(self.selected_pen)
-            pen.setWidth(2.5)
-            painter.setPen(pen)
-        elif self._is_hovered:
-            pen = QPen(self.hover_pen)
-            pen.setWidth(2.5)
-            painter.setPen(pen)
-        else:
-            pen = QPen(self.normal_pen)
-            pen.setWidth(1.5)
-            painter.setPen(pen)
-        
+        self.update_appearance()
+        painter.setPen(self.pen())
         painter.drawPath(self.path())
+        
         painter.restore()
     
     def hoverEnterEvent(self, event):
+        """Yellow glow on hover"""
         self._is_hovered = True
         self.update()
         super().hoverEnterEvent(event)
     
     def hoverLeaveEvent(self, event):
+        """Remove yellow glow"""
         self._is_hovered = False
         self.update()
         super().hoverLeaveEvent(event)
-
-    def set_main_window(self, window):
-        self.main_window = window
     
-    def update_path(self):
-        """Draw the complete path of the wire through segments"""
-        if not self.wire.segments:
-            # Fallback to direct connection
-            self._draw_direct_path()
-            return
-        
-        path = QPainterPath()
-        
-        # Start from the from_pin
-        if self.wire.from_pin:
-            start_pos = self.wire.from_pin.scene_position()
-            path.moveTo(start_pos)
-        
-        # Add all segment paths
-        for i, segment in enumerate(self.wire.segments):
-            if segment.start_node and segment.end_node:
-                p1 = QPointF(*segment.start_node.position)
-                p2 = QPointF(*segment.end_node.position)
-                
-                # Determine direction
-                if i == 0 and self.wire.from_pin:
-                    # First segment: connect from pin to first node
-                    path.lineTo(p1)
-                
-                # Add the segment path
-                path.lineTo(p2)
-                
-                # If last segment, connect to to_pin
-                if i == len(self.wire.segments) - 1 and self.wire.to_pin:
-                    end_pos = self.wire.to_pin.scene_position()
-                    path.lineTo(end_pos)
-        
-        self.setPath(path)
-        
-        # Set color from wire
-        pen = QPen(QColor(*self.wire.color_data.rgb), 1.5)
-        self.setPen(pen)
-    
-    def _add_segment_path(self, path, p1, p2):
-  
-        path.lineTo(p2)
-    
-    def _add_connection_path(self, path, from_point, to_point):
-        """Add connection from pin to node"""
-        path.lineTo(to_point)
-    
-    def _draw_direct_path(self):
-        """Fallback: draw direct Manhattan path"""
-        if not self.wire.from_pin or not self.wire.to_pin:
-            return
-        
-        p1 = self.wire.from_pin.scene_position()
-        p2 = self.wire.to_pin.scene_position()
-        
-        path = QPainterPath(p1)
-        
-        
-        
-        self.setPath(path)
-    
-    def paint(self, painter, option, widget):
-        pen = self.pen()
-        if option.state & QStyle.State_Selected:
-            pen.setWidth(3)
-            pen.setColor(Qt.cyan)
-        painter.setPen(pen)
-        painter.drawPath(self.path())
     def cleanup(self):
-        """Clean up segmented wire references"""
+        """Clean up wire references"""
         if self.tree_item:
             try:
                 tree = self.tree_item.treeWidget()
