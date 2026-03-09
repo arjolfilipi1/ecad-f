@@ -58,7 +58,8 @@ class ConnectorItem(QGraphicsRectItem):
         from graphics.connector_info_table import ConnectorInfoTable
         self.info_table = ConnectorInfoTable(self)
         self.compact_mode = False
-
+        if hasattr(self, 'main_window') and self.main_window:
+            self.main_window.register_graphics_item(self, 'connectors')
         self.shadow = QGraphicsDropShadowEffect()
         self.setup_info_table()
         # 2. Configure properties
@@ -139,7 +140,9 @@ class ConnectorItem(QGraphicsRectItem):
     def set_main_window(self, window):
         """Set reference to main window for topology access"""
         self.main_window = window
-        
+        if hasattr(self, 'main_window') and self.main_window:
+            self.main_window.register_graphics_item(self, 'connectors')
+            
     def create_topology_node(self):
         """Create topology node for this connector"""
         if self.topology_manager:
@@ -332,6 +335,8 @@ class ConnectorItem(QGraphicsRectItem):
     
     def cleanup(self):
         """Remove references before deletion"""
+        if self.main_window:
+            self.main_window.unregister_graphics_item(self, 'connectors')
         if self.tree_item:
             try:
                 tree = self.tree_item.treeWidget()

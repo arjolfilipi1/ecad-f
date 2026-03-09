@@ -153,7 +153,10 @@ class DeleteConnectorCommand(CompoundCommand):
     def _execute(self):
         print("delete conn")
         """Execute the deletion - remove connector but keep wires"""
-        
+        connector = self.main_window.get_graphics_item(self.connector_id, 'connectors')
+        if not connector:
+            print(f"Connector {self.connector_id} not found in repository")
+            return
         # First, disconnect all wires from this connector's pins
         for pin in self.connector.pins:
             # Clear wire references from pin model
@@ -174,8 +177,8 @@ class DeleteConnectorCommand(CompoundCommand):
         self.connector.cleanup()
         
         # Remove connector from scene
-        if self.connector.scene() == self.scene:
-            self.scene.removeItem(self.connector)
+        if connector.scene() == self.scene:
+            self.scene.removeItem(connector)
         else:
             print("connector was already removed")
         # Remove from harness
@@ -197,35 +200,25 @@ class DeleteConnectorCommand(CompoundCommand):
     def undo(self):
         print("undelete conn")
         """Undo the deletion"""
-        # First, recreate the connector
-        from graphics.connector_item import ConnectorItem
-        
-        new_connector = ConnectorItem(self.model)
-        new_connector.setRotation(self.rotation)
-        new_connector.setPos(self.position)
-        
-        # Setup topology
-        new_connector.set_topology_manager(self.main_window.topology_manager)
-        new_connector.set_main_window(self.main_window)
-        new_connector.create_topology_node()
-        new_connector.setup_info_table()
+        connector = self.main_window.restore_orphaned_item(self.connector_id, 'connectors')
+        if not connector:
+            print(f"Connector {self.connector_id} not found in orphaned items")
+            return
         
         # Add to scene
-        self.scene.addItem(new_connector)
-        self.connector = new_connector
-        self.main_window.conns.append(new_connector)
-        self.main_window.wiringharness.add_connector(self.model)
+        self.scene.addItem(connector)
+        self.main_window.wiringharness.add_connector(connector.model)
         
         # Create tree item
         item = QTreeWidgetItem([self.model.id])
-        item.setData(0, Qt.UserRole, new_connector)
+        item.setData(0, Qt.UserRole, connector)
         if hasattr(self.main_window, 'objects_dock'):
             self.main_window.objects_dock.connectors_tree.addTopLevelItem(item)
-        new_connector.tree_item = item
+        connector.tree_item = item
         # Reconnect wires to their original pins
         for pin_data in self.pins_data:
             # Find the pin in the new connector
-            pin = new_connector.get_pin_by_id(pin_data['pin_id'])
+            pin = connector.get_pin_by_id(pin_data['pin_id'])
             if not pin:
                 continue
             
@@ -257,7 +250,7 @@ class DeleteConnectorCommand(CompoundCommand):
                     if wire.wid not in pin.model.wire_ids:
                         pin.model.wire_ids.append(wire.wid)
 
-        self.connector = new_connector
+        self.connector = connector
         # Update all affected wires
         for wire in self.connected_wires:
             try:

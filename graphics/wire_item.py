@@ -232,6 +232,8 @@ class SegmentedWireItem(QGraphicsPathItem):
     def set_main_window(self, window):
         """Set reference to main window"""
         self.main_window = window
+        if window:
+            window.register_graphics_item(self, 'wires')
     
     def update_path(self):
         """Draw the complete path of the wire through segments"""
@@ -337,6 +339,8 @@ class SegmentedWireItem(QGraphicsPathItem):
     
     def cleanup(self):
         """Clean up wire references"""
+        if self.main_window:
+            self.main_window.unregister_graphics_item(self, 'wires')
         if self.tree_item:
             try:
                 tree = self.tree_item.treeWidget()

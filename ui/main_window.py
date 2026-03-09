@@ -79,7 +79,22 @@ class MainWindow(QMainWindow):
         # self.routed_wire_items = []
         self.moving_connector = None
         
+        self.graphics_repository = {
+            'connectors': {},  # id -> connector_item
+            'wires': {},       # id -> wire_item
+            'bundles': {},     # id -> bundle_item
+            'branch_points': {}, # id -> branch_point_item
+            'junctions': {},   # id -> junction_item
+        }
         
+        # Track items that are "alive" but not in scene
+        self.orphaned_items = {
+            'connectors': {},
+            'wires': {},
+            'bundles': {},
+            'branch_points': {},
+            'junctions': {},
+        }
         
         # Apply theme
         self.setStyleSheet(self.settings_manager.get_theme_stylesheet())
@@ -821,3 +836,151 @@ class MainWindow(QMainWindow):
                 event.ignore()
         else:
             event.accept()
+    
+    def register_graphics_item(self, item, item_type=None):
+        """Register a graphics item in the repository"""
+        if item_type is None:
+            # Auto-detect type
+            if hasattr(item, 'model') and hasattr(item.model, 'id'):
+                item_id = item.model.id
+                if hasattr(item, 'pins'):  # ConnectorItem
+                    item_type = 'connectors'
+                elif hasattr(item, 'wid'):  # WireItem
+                    item_type = 'wires'
+            elif hasattr(item, 'bundle_id'):
+                item_id = item.bundle_id
+                item_type = 'bundles'
+            elif hasattr(item, 'branch_node'):
+                item_id = item.branch_node.id
+                item_type = 'branch_points'
+            elif hasattr(item, 'junction_node'):
+                item_id = item.junction_node.id
+                item_type = 'junctions'
+            else:
+                return None
+        else:
+            # Get ID based on type
+            if item_type == 'connectors':
+                item_id = item.model.id
+            elif item_type == 'wires':
+                item_id = item.wid
+            elif item_type == 'bundles':
+                item_id = item.bundle_id
+            elif item_type == 'branch_points':
+                item_id = item.branch_node.id
+            elif item_type == 'junctions':
+                item_id = item.junction_node.id
+            else:
+                return None
+        
+        # Store in repository
+        self.graphics_repository[item_type][item_id] = item
+        
+        # Remove from orphaned if it was there
+        if item_id in self.orphaned_items[item_type]:
+            del self.orphaned_items[item_type][item_id]
+        
+        return item_id
+    
+    def unregister_graphics_item(self, item, item_type=None):
+        """Move item from repository to orphaned (when removed from scene but not deleted)"""
+        if item_type is None:
+            # Auto-detect type
+            if hasattr(item, 'model') and hasattr(item.model, 'id'):
+                item_id = item.model.id
+                if hasattr(item, 'pins'):  # ConnectorItem
+                    item_type = 'connectors'
+                elif hasattr(item, 'wid'):  # WireItem
+                    item_type = 'wires'
+            elif hasattr(item, 'bundle_id'):
+                item_id = item.bundle_id
+                item_type = 'bundles'
+            elif hasattr(item, 'branch_node'):
+                item_id = item.branch_node.id
+                item_type = 'branch_points'
+            elif hasattr(item, 'junction_node'):
+                item_id = item.junction_node.id
+                item_type = 'junctions'
+            else:
+                return False
+        else:
+            if item_type == 'connectors':
+                item_id = item.model.id
+            elif item_type == 'wires':
+                item_id = item.wid
+            elif item_type == 'bundles':
+                item_id = item.bundle_id
+            elif item_type == 'branch_points':
+                item_id = item.branch_node.id
+            elif item_type == 'junctions':
+                item_id = item.junction_node.id
+            else:
+                return False
+        
+        # Move from repository to orphaned
+        if item_id in self.graphics_repository[item_type]:
+            self.orphaned_items[item_type][item_id] = self.graphics_repository[item_type][item_id]
+            del self.graphics_repository[item_type][item_id]
+            return True
+        
+        return False
+    
+    def delete_graphics_item(self, item, item_type=None):
+        """Completely remove item from both repository and orphaned"""
+        if item_type is None:
+            # Auto-detect type
+            if hasattr(item, 'model') and hasattr(item.model, 'id'):
+                item_id = item.model.id
+                if hasattr(item, 'pins'):  # ConnectorItem
+                    item_type = 'connectors'
+                elif hasattr(item, 'wid'):  # WireItem
+                    item_type = 'wires'
+            elif hasattr(item, 'bundle_id'):
+                item_id = item.bundle_id
+                item_type = 'bundles'
+            elif hasattr(item, 'branch_node'):
+                item_id = item.branch_node.id
+                item_type = 'branch_points'
+            elif hasattr(item, 'junction_node'):
+                item_id = item.junction_node.id
+                item_type = 'junctions'
+            else:
+                return False
+        else:
+            if item_type == 'connectors':
+                item_id = item.model.id
+            elif item_type == 'wires':
+                item_id = item.wid
+            elif item_type == 'bundles':
+                item_id = item.bundle_id
+            elif item_type == 'branch_points':
+                item_id = item.branch_node.id
+            elif item_type == 'junctions':
+                item_id = item.junction_node.id
+            else:
+                return False
+        
+        # Remove from both dictionaries
+        if item_id in self.graphics_repository[item_type]:
+            del self.graphics_repository[item_type][item_id]
+        if item_id in self.orphaned_items[item_type]:
+            del self.orphaned_items[item_type][item_id]
+        
+        return True
+    
+    def get_graphics_item(self, item_id, item_type):
+        """Get a graphics item by ID, checking both repository and orphaned"""
+        if item_id in self.graphics_repository[item_type]:
+            return self.graphics_repository[item_type][item_id]
+        if item_id in self.orphaned_items[item_type]:
+            return self.orphaned_items[item_type][item_id]
+        return None
+    
+    def restore_orphaned_item(self, item_id, item_type):
+        """Move an item from orphaned back to repository (when re-added to scene)"""
+        if item_id in self.orphaned_items[item_type]:
+            item = self.orphaned_items[item_type][item_id]
+            self.graphics_repository[item_type][item_id] = item
+            del self.orphaned_items[item_type][item_id]
+            return item
+        return None
