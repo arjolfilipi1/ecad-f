@@ -251,8 +251,8 @@ class PropertyEditor(QWidget):
         layout.addWidget(id_label)
         
         # Wire ID (if connected)
-        if pin.wire_id:
-            wire_label = QLabel(f"→ {pin.wire_id[0].wid}")
+        if pin.wire_ids:
+            wire_label = QLabel(f"→ {pin.wire_ids[0]}")
             wire_label.setStyleSheet("color: green;")
             layout.addWidget(wire_label)
         else:

@@ -71,12 +71,10 @@ class WireItem(QGraphicsPathItem):
         self.is_connected = True
         
         # Add this wire to the pins' wire lists
-        start_pin.add_wire(self)
-        end_pin.add_wire(self)
+        start_pin.add_wire(self) if start_pin else None
+        end_pin.add_wire(self)   if   end_pin else None
         
-        # Update pin models with wire ID
-        start_pin.model.add_wire(self.model)
-        end_pin.model.add_wire(self.model)
+       
         
         # Update the path
         self.update_path()
@@ -166,19 +164,17 @@ class WireItem(QGraphicsPathItem):
     def cleanup(self):
         """Clean up wire references before deletion"""
         # Remove from pins' wire_items lists
-        if self.start_pin and self in self.start_pin.wire_items:
-            self.start_pin.wire_items.remove(self)
-        
-        if self.end_pin and self in self.end_pin.wire_items:
-            self.end_pin.wire_items.remove(self)
-        
+        if self.start_pin:
+            self.start_pin.remove_wire(self)
+        if self.end_pin:
+            self.end_pin.remove_wire(self)
         # Remove tree item reference (don't try to remove from tree here,
         # as the tree might be in the process of being cleared)
         self.tree_item = None
         
         # Clear graphics item reference from model
-        if hasattr(self, 'model') and self.model:
-            self.model.graphics_item = None
+        # if hasattr(self, 'model') and self.model:
+            # self.model.graphics_item = None
         
     def __del__(self):
         """Ensure cleanup on deletion"""

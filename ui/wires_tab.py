@@ -221,7 +221,7 @@ class WiresTab(QWidget):
                 display_text = str(pin_model.number)
                 
                 # Check if pin is used by looking at wire_id in the model
-                if pin_model.wire_id:
+                if pin_model.wire_ids:
                     display_text += " (used)"
                 
                 self.from_pin_combo.addItem(display_text, pin_model)
@@ -236,7 +236,7 @@ class WiresTab(QWidget):
                 display_text = str(pin_model.number)
                 
                 # Check if pin is used by looking at wire_id in the model
-                if pin_model.wire_id:
+                if pin_model.wire_ids:
                     display_text += " (used)"
                 
                 self.to_pin_combo.addItem(display_text, pin_model)

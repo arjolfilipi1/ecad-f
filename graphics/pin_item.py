@@ -46,8 +46,12 @@ class PinItem(QGraphicsEllipseItem):
         
 
     def add_wire(self, wire):
-        self.model.add_wire(wire)#change to wire.model later
+        self.model.add_wire_model(wire.model)
         self.wire_items.append(wire)
+    def remove_wire(self, wire):
+        self.model.remove_wire_model(wire.model)
+        if wire in self.wire_items:
+            self.wire_items.remove(wire)
     @property
     def pid(self) -> str:
         """Get pin identifier"""

@@ -405,6 +405,7 @@ class MainWindow(QMainWindow):
             # Get all connectors from harness
             connectors = [conn.graphics_item for conn in self.wiringharness.connectors.values() 
                          if conn.graphics_item is not None]
+
             wires = [wire.graphics_item for wire in self.wiringharness.wires.values() 
                     if wire.graphics_item is not None]
             self.objects_dock.refresh_trees(connectors, wires)

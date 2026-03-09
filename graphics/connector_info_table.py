@@ -107,7 +107,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         self.table.setRowCount(len(pins))
         
         # Populate rows
-        max_wire_length = 0
+        max_wire_length = 0 
         for row,pin_data in enumerate(pins.items()):
             nr , pin = pin_data
             # Pin number
@@ -116,8 +116,8 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
             self.table.setItem(row, 0, pin_item)
             
             # Wire ID
-            if pin.wire_id:
-                wire = pin.wire_id[0]
+            if pin.wire_ids:
+                wire = pin.wire_ids[0]
                 wire_id = wire.wid if hasattr(wire, 'wid') else str(wire)
                 
                 wire_item = QTableWidgetItem(wire_id)
@@ -140,7 +140,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
             self.table.setItem(row, 1, wire_item)
             
             # Color
-            if pin.wire_id and hasattr(pin.wire_id[0], 'color_data'):
+            if pin.wire_ids and hasattr(pin.wire_ids[0], 'color_data'):
                 color_code = pin.wire_id[0].color_data.code
                 color_item = QTableWidgetItem(color_code)
                 

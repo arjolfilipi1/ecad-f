@@ -98,7 +98,7 @@ class ConnectorItem(QGraphicsRectItem):
     def _update_connected_bundles(self):
         """Update all bundles connected to this connector"""
         if not self.topology_node:
-            # print("no topology node")
+            # "no topology node")
             return
         
         # Find all bundles connected to this node

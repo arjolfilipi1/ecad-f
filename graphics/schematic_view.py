@@ -227,7 +227,7 @@ class SchematicView(QGraphicsView):
                 
                 # Add with undo
                 self.parent.add_connector_with_undo(c, pos)
-                self.scene().addItem(c)
+                # self.scene().addItem(c)
                 event.accept()
                 return
             

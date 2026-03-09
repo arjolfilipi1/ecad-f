@@ -215,20 +215,32 @@ class Pin:
     number: str
     gender: Gender
     seal: SealType
-    wire_id: Optional[str] = None
+    wire_ids: List[str] = None
     description: Optional[str] = None
     current_rating: Optional[float] = None  # Amps
     graphics_item: Optional[any] = None
     
     def is_used(self) -> bool:
-        return self.wire_id is not None
+        return len(self.wire_ids) > 0
         
-    def add_wire(self,wire):
-        print(self.wire_id)
-        if not self.wire_id:
-            self.wire_id = []
-        self.wire_id.append(wire)
+    def add_wire_model(self,wire):
         
+        if isinstance(wire,Wire):
+            if not self.wire_ids:
+                self.wire_ids = []
+            self.wire_ids.append(wire.id)
+        else:
+            print("wire model given to pin model is wrong type",type(wire))
+        print("added wire",self.wire_ids)
+    def remove_wire_model(self,wire):
+        if isinstance(wire,Wire) and self.wire_ids is not None:
+            if wire.id in self.wire_ids:
+                self.wire_ids.remove(wire.id)
+                if self.graphics_item and self.graphics_item.parent:
+                    self.graphics_item.parent.update_info_display()
+        else:
+            print("wire model given to pin model is wrong type",type(wire))
+        print("removed wire",self.wire_ids,wire.id)
     def to_dict(self) -> dict:
         return {
             'number': self.number,
@@ -267,6 +279,9 @@ class Wire:
     notes: Optional[str] = None
     cross_section:Optional[float] = None
     graphics_item: Optional[any] = None
+    
+    def __str__(self):
+        return self.id
     
     def to_dict(self) -> dict:
         return {
@@ -497,7 +512,9 @@ class WiringHarness:
     def add_connector(self, connector: Connector) -> None:
         self.connectors[connector.id] = connector
         self.modified_date = datetime.now()
-    
+    def remove_connector(self, connector: Connector) -> None:
+        del self.connectors[connector.id]
+        self.modified_date = datetime.now()
     def add_wire(self, wire: Wire) -> None:
         self.wires[wire.id] = wire
         self.modified_date = datetime.now()

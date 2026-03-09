@@ -5,60 +5,97 @@ from .base_command import BaseCommand, CompoundCommand
 class AddConnectorCommand(BaseCommand):
     """Add a new connector to the scene"""
     
-    def __init__(self, scene, connector_item, pos: QPointF, description="Add Connector",main_window= None):
+    def __init__(self, scene, connector_item, pos: QPointF, description="Add Connector", main_window=None):
         super().__init__(description)
         self.scene = scene
         self.connector = connector_item
         self.pos = pos
         self.main_window = main_window
-        main_window.conns.append(connector_item)
-        main_window.wiringharness.add_connector(connector_item.model)
         self.connector_id = connector_item.model.id
         self.pin_count = len(connector_item.pins)
         self.model = self.connector.model
-    def redo(self):
-        if self.first_redo:
-            self.first_redo = False
+        self._initialized = False
+        self._tree_item = None
+    
+    def _initialize(self):
+        """First time execution"""
+        self._execute()
+    
+    def _redo(self):
+        """Subsequent redos"""
+        self._execute()
+    
+    def _execute(self):
+        print("add conn")
+        """Common execution logic"""
+        # Skip if already in scene
+        if self.connector.scene() == self.scene:
             return
-        
+            
+        self.model.graphics_item = self.connector
         self.connector.setPos(self.pos)
         self.scene.addItem(self.connector)
-        
-
         self.main_window.wiringharness.add_connector(self.model)
+        
         # Setup info table if not already done
         if not hasattr(self.connector, 'info_table') or not self.connector.info_table:
             self.connector.setup_info_table()
-
-        # Update tree
+        
+        # Create tree item if needed
+        if not self.connector.tree_item:
+            item = QTreeWidgetItem([self.connector.model.id])
+            item.setData(0, Qt.UserRole, self.connector)
+            if hasattr(self.main_window, 'objects_dock'):
+                self.main_window.objects_dock.connectors_tree.addTopLevelItem(item)
+            self.connector.tree_item = item
+            self._tree_item = item
+        self.connector.info_table.refresh()
         self.main_window.refresh_tree_views()
     
     def undo(self):
-        # Clean up info table first
+        print("unadd conn")
+        """Undo the command"""
+        # Clean up info table
         if hasattr(self.connector, 'info_table') and self.connector.info_table:
-            if self.connector.info_table.scene():
-                self.scene.removeItem(self.connector.info_table)
-            self.connector.info_table.deleteLater()
+            try:
+                if self.connector.info_table.scene():
+                    self.scene.removeItem(self.connector.info_table)
+                self.connector.info_table.deleteLater()
+            except RuntimeError:
+                pass
             self.connector.info_table = None
-
-        self.scene.removeItem(self.connector)
         
-        # Remove from main window lists
-        if hasattr(self.main_window, 'conns') and self.connector in self.main_window.conns:
-            self.main_window.conns.remove(self.connector)
+        # Remove from scene
+        if self.connector.scene() == self.scene:
+            self.scene.removeItem(self.connector)
+        else:
+            print("connector was already removed")
+            
+        # Remove from harness
+        if self.model.id in self.main_window.wiringharness.connectors:
+            self.main_window.wiringharness.remove_connector(self.model)
         
-        # Update tree
+        # Remove tree item
+        if self.connector.tree_item:
+            try:
+                tree = self.connector.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    index = tree.indexOfTopLevelItem(self.connector.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except RuntimeError:
+                pass
+            self.connector.tree_item = None
+        
         self.main_window.refresh_tree_views()
     
-    def to_dict(self) -> dict:
-        data = super().to_dict()
-        data.update({
-            'connector_id': self.connector_id,
-            'pos_x': self.pos.x(),
-            'pos_y': self.pos.y(),
-            'pin_count': self.pin_count
-        })
-        return data
+    def redo(self):
+        """Override to use the new pattern"""
+        if not self._initialized:
+            self._initialized = True
+            self._initialize()
+        else:
+            self._redo()
 
 
 class DeleteConnectorCommand(CompoundCommand):
@@ -66,81 +103,106 @@ class DeleteConnectorCommand(CompoundCommand):
     
     def __init__(self, main_window, scene, connector_item):
         super().__init__("Delete Connector")
-        self.scene = scene
         self.main_window = main_window
+        self.scene = scene
         self.connector = connector_item
-        self.wire_commands = []
+        self._initialized = False
         
         # Store connector data for recreation
         self.connector_id = connector_item.model.id
-        self.pins_data = []  # Store pin wire connections
-        self.wire_data_list = []  # Store wire data for recreation
+        self.model = connector_item.model
+        self.position = connector_item.pos()
+        self.rotation = connector_item.model.rotation
         
-        # Store which wires were connected to which pins
+        # Store pin data and wire connections
+        self.pins_data = []
+        self.connected_wires = []  # Store wires that were connected to this connector
+        
+        # Store wire connections but DON'T delete them
         for pin in connector_item.pins:
-            # Store the wire items and their data before they're deleted
             pin_wires = list(pin.wire_items)
             wire_ids = []
             
             for wire in pin_wires:
-                # Store wire data
-                wire_data = {
-                    'wid': wire.wid,
-                    'color': wire.color_data.code if hasattr(wire, 'color_data') else 'SW',
-                    'net': wire.net,
-                    'from_pin': wire.start_pin,
-                    'to_pin': wire.end_pin,
-                    'tree_item_text': wire.tree_item.text(0) if wire.tree_item else None
-                }
-                self.wire_data_list.append(wire_data)
-                wire_ids.append(wire.wid)
+                # Store wire reference
+                if wire not in self.connected_wires:
+                    self.connected_wires.append(wire)
                 
-                # Create delete command for the wire
-                from commands.wire_commands import DeleteWireCommand
-                self.add_command(DeleteWireCommand(scene, wire, main_window))
+                # Store which pin this wire was connected to
+                wire_ids.append({
+                    'wire': wire,
+                    'wire_id': wire.wid,
+                    'pin_id': pin.model.pid
+                })
             
             self.pins_data.append({
-                'pin_id': pin.original_id or pin.pid,
+                'pin_id': pin.model.pid,
                 'wire_ids': wire_ids
             })
-        
-        # Store connector properties
-        self.properties = {
-            'part_number': getattr(connector_item, 'part_number', None),
-            'manufacturer': getattr(connector_item, 'manufacturer', None),
-            'pos': connector_item.pos(),
-            'rotation': connector_item.model.rotation
-        }
     
-    def redo(self):
-        # Call cleanup on connector before removing
+
+    
+    def _initialize(self):
+        """First time execution"""
+        self._execute()
+    
+    def _redo(self):
+        """Subsequent redos"""
+        self._execute()
+    
+    def _execute(self):
+        print("delete conn")
+        """Execute the deletion - remove connector but keep wires"""
+        
+        # First, disconnect all wires from this connector's pins
+        for pin in self.connector.pins:
+            # Clear wire references from pin model
+            if pin.model.wire_ids:
+                if isinstance(pin.model.wire_ids, list):
+                    pin.model.wire_ids.clear()
+                else:
+                    pin.model.wire_ids = None
+            
+            # Remove wire references from pin graphics
+            wire_items = list(pin.wire_items)  # Make a copy
+            for wire in wire_items:
+                if wire in pin.wire_items:
+                    pin.wire_items.remove(wire)
+
+        
+        # Call cleanup on connector
         self.connector.cleanup()
         
         # Remove connector from scene
-        self.scene.removeItem(self.connector)
+        if self.connector.scene() == self.scene:
+            self.scene.removeItem(self.connector)
+        else:
+            print("connector was already removed")
+        # Remove from harness
+        if self.model.id in self.main_window.wiringharness.connectors:
+            del self.main_window.wiringharness.connectors[self.model.id]
         
-        # Remove from main window lists
-        if hasattr(self.main_window, 'conns') and self.connector in self.main_window.conns:
-            self.main_window.conns.remove(self.connector)
-            
-        # Execute wire deletions
-        super().redo()
+        # Update wire paths (they're now disconnected at one end)
+        for wire in self.connected_wires:
+            try:
+                wire.update_path()
+                wire.update()
+            except RuntimeError:
+                pass
+        
+        self.main_window.refresh_tree_views()
+
         self.main_window.refresh_tree_views()
     
     def undo(self):
-        # First, execute parent undo (which will undo wire deletions)
-        super().undo()
-        
-        # Now recreate the connector
+        print("undelete conn")
+        """Undo the deletion"""
+        # First, recreate the connector
         from graphics.connector_item import ConnectorItem
         
-        new_connector = ConnectorItem(self.connector.model)
-        new_connector.setRotation(self.properties['rotation'])
-        
-        # Restore properties
-        for key, value in self.properties.items():
-            if value is not None and key not in ['pos', 'rotation']:
-                setattr(new_connector, key, value)
+        new_connector = ConnectorItem(self.model)
+        new_connector.setRotation(self.rotation)
+        new_connector.setPos(self.position)
         
         # Setup topology
         new_connector.set_topology_manager(self.main_window.topology_manager)
@@ -148,81 +210,74 @@ class DeleteConnectorCommand(CompoundCommand):
         new_connector.create_topology_node()
         new_connector.setup_info_table()
         
-        # Set position
-        new_connector.setPos(self.properties['pos'])
-        
         # Add to scene
         self.scene.addItem(new_connector)
+        self.connector = new_connector
         self.main_window.conns.append(new_connector)
-        self.main_window.wiringharness.add_connector(new_connector.model)
+        self.main_window.wiringharness.add_connector(self.model)
         
-        # Recreate tree item
-        from PyQt5.QtWidgets import QTreeWidgetItem
-        item = QTreeWidgetItem([new_connector.model.id])
+        # Create tree item
+        item = QTreeWidgetItem([self.model.id])
         item.setData(0, Qt.UserRole, new_connector)
-        self.main_window.objects_dock.connectors_tree.addTopLevelItem(item)
+        if hasattr(self.main_window, 'objects_dock'):
+            self.main_window.objects_dock.connectors_tree.addTopLevelItem(item)
         new_connector.tree_item = item
-        
-        # Now recreate the wires
-        from graphics.wire_item import WireItem
-        from model.netlist import Netlist
-        
-        # Create a netlist if needed
-        netlist = Netlist()
-        self.main_window.topology_manager.set_netlist(netlist)
-        
-        for wire_data in self.wire_data_list:
-            # Find the pins in the new connector
-            from_pin = None
-            to_pin = None
-            
-            # If the wire was connected to this connector at either end
-            if wire_data['from_pin'].parent == self.connector:
-                # Find the corresponding pin in the new connector
-                pin_id = wire_data['from_pin'].original_id
-                from_pin = new_connector.get_pin_by_id(pin_id)
-                to_pin = wire_data['to_pin']  # This should still exist
-            elif wire_data['to_pin'].parent == self.connector:
-                # Find the corresponding pin in the new connector
-                pin_id = wire_data['to_pin'].original_id
-                to_pin = new_connector.get_pin_by_id(pin_id)
-                from_pin = wire_data['from_pin']  # This should still exist
-            else:
-                continue  # Wire not connected to this connector? Shouldn't happen
-            
-            if not from_pin or not to_pin:
+        # Reconnect wires to their original pins
+        for pin_data in self.pins_data:
+            # Find the pin in the new connector
+            pin = new_connector.get_pin_by_id(pin_data['pin_id'])
+            if not pin:
                 continue
             
-            # Create net
-            net = netlist.connect(from_pin, to_pin)
-            
-            # Recreate the wire
-            new_wire = WireItem(
-                wire_data['wid'],
-                from_pin,
-                to_pin,
-                wire_data['color'],
-                net
-            )
-            new_wire.net = net
-            
-            # Add to scene
-            self.scene.addItem(new_wire)
-            
-            # Add to main window lists
-            if not hasattr(self.main_window, 'imported_wire_items'):
-                self.main_window.imported_wire_items = []
-            self.main_window.imported_wire_items.append(new_wire)
-            
-            # Create tree item
-            wire_item = QTreeWidgetItem([wire_data['wid']])
-            wire_item.setData(0, Qt.UserRole, new_wire)
-            self.main_window.objects_dock.wires_tab.wires_tree.addTopLevelItem(wire_item)
-            new_wire.tree_item = wire_item
-        
-        self.connector = new_connector
-        self.main_window.refresh_tree_views()
+            # Reconnect each wire that was connected to this pin
+            for wire_info in pin_data['wire_ids']:
+                wire = wire_info['wire']
+                
+                # Check which end of the wire was connected to this connector
+                if wire.start_pin and wire.start_pin.parent == self.connector:
+                    # This connector was the start - reconnect start pin
+                    wire.start_pin = pin
+                    pin.add_wire(wire)
+                    if wire.model:
+                        wire.model.from_pin = pin.model.pid
+                        wire.model.from_node_id = self.model.id
+                
+                elif wire.end_pin and wire.end_pin.parent == self.connector:
+                    # This connector was the end - reconnect end pin
+                    wire.end_pin = pin
+                    pin.add_wire(wire)
+                    if wire.model:
+                        wire.model.to_pin = pin.model.pid
+                        wire.model.to_node_id = self.model.id
+                
+                # Update pin model wire reference
+                if not pin.model.wire_ids:
+                    pin.model.wire_ids = []
+                if isinstance(pin.model.wire_ids, list):
+                    if wire.wid not in pin.model.wire_ids:
+                        pin.model.wire_ids.append(wire.wid)
 
+        self.connector = new_connector
+        # Update all affected wires
+        for wire in self.connected_wires:
+            try:
+                wire.update_path()
+                wire.update()
+            except RuntimeError:
+                pass
+
+        # Now undo wire deletions (recreate wires)
+        super().undo()
+        
+        self.main_window.refresh_tree_views()
+    
+    def redo(self):
+        """Override to use the new pattern"""
+        if not self._initialized:
+            self._initialized = True
+            self._execute()
+        else:
+            super().redo()  # This will call the CompoundCommand's redo which executes all child commands
 
 
 class MoveConnectorCommand(BaseCommand):
@@ -233,21 +288,40 @@ class MoveConnectorCommand(BaseCommand):
         self.connector = connector
         self.old_pos = old_pos
         self.new_pos = new_pos
-        self.moved_pins = []  # Store pin positions for debugging
+        self._initialized = False
     
-    def redo(self):
+    def _initialize(self):
+        """First time execution - shouldn't happen for move commands"""
+        self._redo()
+    
+    def _redo(self):
+        """Execute the move"""
         self.connector.setPos(self.new_pos)
-        # Update connected wires
-        for pin in self.connector.pins:
-            for wire in pin.wire_items:
-                wire.update_path()
+        self._update_connected_wires()
+        self.connector.model.position = [self.new_pos.x(), self.new_pos.y()]
     
     def undo(self):
+        """Undo the move"""
         self.connector.setPos(self.old_pos)
-        # Update connected wires
+        self._update_connected_wires()
+        self.connector.model.position = [self.old_pos.x(), self.old_pos.y()]
+    
+    def _update_connected_wires(self):
+        """Update all wires connected to this connector"""
         for pin in self.connector.pins:
             for wire in pin.wire_items:
-                wire.update_path()
+                try:
+                    wire.update_path()
+                except RuntimeError:
+                    pass  # Wire might be deleted
+    
+    def redo(self):
+        """Override to use the new pattern"""
+        if not self._initialized:
+            self._initialized = True
+            self._initialize()
+        else:
+            self._redo()
     
     def mergeWith(self, other) -> bool:
         """Merge consecutive move commands"""
@@ -269,20 +343,40 @@ class RotateConnectorCommand(BaseCommand):
         self.connector = connector
         self.old_angle = old_angle
         self.new_angle = new_angle
+        self._initialized = False
     
-    def redo(self):
+    def _initialize(self):
+        """First time execution"""
+        self._redo()
+    
+    def _redo(self):
+        """Execute the rotation"""
         self.connector.setRotation(self.new_angle)
-        # Update connected wires
-        for pin in self.connector.pins:
-            for wire in pin.wire_items:
-                wire.update_path()
+        self.connector.model.rotation = self.new_angle
+        self._update_connected_wires()
     
     def undo(self):
+        """Undo the rotation"""
         self.connector.setRotation(self.old_angle)
-        # Update connected wires
+        self.connector.model.rotation = self.old_angle
+        self._update_connected_wires()
+    
+    def _update_connected_wires(self):
+        """Update all wires connected to this connector"""
         for pin in self.connector.pins:
             for wire in pin.wire_items:
-                wire.update_path()
+                try:
+                    wire.update_path()
+                except RuntimeError:
+                    pass
+    
+    def redo(self):
+        """Override to use the new pattern"""
+        if not self._initialized:
+            self._initialized = True
+            self._initialize()
+        else:
+            self._redo()
 
 
 class UpdateConnectorPropertiesCommand(BaseCommand):
@@ -293,15 +387,45 @@ class UpdateConnectorPropertiesCommand(BaseCommand):
         self.connector = connector
         self.old_props = old_props
         self.new_props = new_props
+        self._initialized = False
     
-    def redo(self):
+    def _initialize(self):
+        """First time execution"""
+        self._redo()
+    
+    def _redo(self):
+        """Apply new properties"""
         for key, value in self.new_props.items():
-            setattr(self.connector, key, value)
-        if hasattr(self.connector, 'info'):
-            self.connector.info.update_text()
+            if hasattr(self.connector, key):
+                setattr(self.connector, key, value)
+            elif hasattr(self.connector.model, key):
+                setattr(self.connector.model, key, value)
+        
+        # Update display
+        if hasattr(self.connector, 'info_table'):
+            self.connector.info_table.update_table()
+        if hasattr(self.connector, '_label'):
+            self.connector._label.setText(self.connector.model.id)
     
     def undo(self):
+        """Revert to old properties"""
         for key, value in self.old_props.items():
-            setattr(self.connector, key, value)
-        if hasattr(self.connector, 'info'):
-            self.connector.info.update_text()
+            if hasattr(self.connector, key):
+                setattr(self.connector, key, value)
+            elif hasattr(self.connector.model, key):
+                setattr(self.connector.model, key, value)
+        
+        # Update display
+        if hasattr(self.connector, 'info_table'):
+            self.connector.info_table.update_table()
+        if hasattr(self.connector, '_label'):
+            self.connector._label.setText(self.connector.model.id)
+    
+    def redo(self):
+        """Override to use the new pattern"""
+        if not self._initialized:
+            self._initialized = True
+            self._initialize()
+        else:
+            self._redo()
+
