@@ -1,0 +1,11 @@
+ui/__pycache__/
+utils/__pycache__/
+dialogs/__pycache__/
+tools/__pycache__/
+controllers/__pycache__/
+menus/__pycache__/
+toolbars/__pycache__/
+commands/__pycache__/
+database/__pycache__/
+graphics/__pycache__/
+model/__pycache__/
