@@ -1,21 +1,32 @@
-#utils/excel_import
+#utils/excel_import.py
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 from uuid import uuid4
-from graphics.topology_item import (
-    JunctionGraphicsItem, BranchPointGraphicsItem
-)
+from PyQt5.QtCore import QPointF
+from PyQt5.QtWidgets import QTreeWidgetItem
+from PyQt5.QtCore import Qt
+
 from graphics.connector_item import ConnectorItem
-from graphics.segment_item import SegmentGraphicsItem
+from graphics.wire_item import WireItem
+from graphics.topology_item import (
+    JunctionGraphicsItem, BranchPointGraphicsItem, FastenerGraphicsItem
+)
+from model.models import (
+    Connector, Pin, Gender, SealType, ConnectorType,
+    Wire, CombinedWireColor, WireType
+)
+from model.netlist import Netlist
+
+
 @dataclass
 class ImportedWire:
     """Wire data extracted from Excel"""
     wire_id: str
     part_number: str = ""
     cross_section: float = 0.5
-    color: str = "BLK"
+    color: str = "SW"
     stripe_color: Optional[str] = None
     
     # From side
@@ -39,6 +50,7 @@ class ImportedWire:
     length: float = 0.0
     bundle_id: Optional[str] = None
 
+
 @dataclass
 class ImportedConnector:
     """Connector data extracted from Excel"""
@@ -47,6 +59,9 @@ class ImportedConnector:
     pin_count: int = 0
     pins: Dict[str, Dict] = field(default_factory=dict)
     position: Optional[str] = None
+    x_pos: float = 100.0
+    y_pos: float = 100.0
+
 
 class ExcelHarnessImporter:
     """Import harness data from client Excel files"""
@@ -67,8 +82,11 @@ class ExcelHarnessImporter:
         'Adress_left': 'from_address',
         'Tool_left': 'from_tool',
         'To': 'to_node_id',
-        'Pin_right': 'to_pin'
-        # Add more columns as needed
+        'Pin_right': 'to_pin',
+        'Contact_right': 'to_contact',
+        'Seal_right': 'to_seal',
+        'Strip_right': 'to_strip',
+        'Tool_right': 'to_tool'
     }
     
     # Color code mapping (common automotive colors)
@@ -96,6 +114,10 @@ class ExcelHarnessImporter:
         self.errors: List[str] = []
         self.warnings: List[str] = []
         
+        # Track created items for undo grouping
+        self.created_connectors = []
+        self.created_wires = []
+        
     def load_excel(self) -> bool:
         """Load Excel file into pandas DataFrame"""
         try:
@@ -105,10 +127,10 @@ class ExcelHarnessImporter:
             elif self.filepath.endswith('.xls'):
                 self.df = pd.read_excel(self.filepath, sheet_name=self.sheet_name, engine='xlrd')
             else:
-                # Try CSV
+                # Try CSV with semicolon separator
                 self.df = pd.read_csv(self.filepath, sep=';')
             
-            #print(f"Loaded {len(self.df)} rows from {self.filepath}")
+            print(f"Loaded {len(self.df)} rows from {self.filepath}")
             return True
         except Exception as e:
             self.errors.append(f"Failed to load Excel: {str(e)}")
@@ -125,7 +147,7 @@ class ExcelHarnessImporter:
         # Drop completely empty rows
         self.df = self.df.dropna(how='all')
         
-        # Forward fill certain columns if needed
+        # Forward fill certain columns if needed (commented out by default)
         # self.df['From'] = self.df['From'].fillna(method='ffill')
         
     def parse_cross_section(self, value) -> float:
@@ -149,7 +171,7 @@ class ExcelHarnessImporter:
     def parse_color(self, color_str) -> Tuple[str, Optional[str]]:
         """Parse color string into base color and stripe"""
         if pd.isna(color_str):
-            return "BLK", None
+            return "SW", None
         
         color_str = str(color_str).strip().upper()
         
@@ -185,6 +207,8 @@ class ExcelHarnessImporter:
                 
                 # Generate wire ID if not present
                 wire_id = row.get('Position')
+                if pd.isna(wire_id) or not wire_id:
+                    wire_id = f"W{wire_counter:04d}"
                 
                 # Extract from side information
                 from_node_id = str(row.get('From', '')).strip()
@@ -229,7 +253,7 @@ class ExcelHarnessImporter:
                 self.errors.append(f"Row {idx}: Failed to parse - {str(e)}")
         
         self.wires = wires
-        #print(f"Extracted {len(wires)} wires")
+        print(f"Extracted {len(wires)} wires")
         return wires
     
     def extract_connectors(self) -> Dict[str, ImportedConnector]:
@@ -283,10 +307,12 @@ class ExcelHarnessImporter:
         
         # Update pin counts
         for connector in connectors.values():
-
-            connector.pin_count = list(connector.pins.keys())
+            connector.pin_count = len(connector.pins)
+            # Sort pins for consistent ordering
+            connector.pins = dict(sorted(connector.pins.items()))
             
         self.connectors = connectors
+        print(f"Extracted {len(connectors)} connectors")
         return connectors
     
     def _find_part_number(self, device_name: str) -> str:
@@ -306,65 +332,56 @@ class ExcelHarnessImporter:
             'errors': self.errors,
             'warnings': self.warnings
         }
+
+
+# ==================== INTEGRATION WITH MAIN WINDOW ====================
+
+def import_from_excel_to_scene(filepath, main_window, auto_route=False):
+    """
+    Import Excel data into the scene with proper undo/redo support
     
-    def to_e3_format(self) -> Dict:
-        """Convert to format compatible with your E3-like system"""
-        return {
-            'wires': [
-                {
-                    'id': w.wire_id,
-                    'name': f"{w.from_node_id}_{w.from_pin}_to_{w.to_node_id}_{w.to_pin}",
-                    'signal_name': w.signal_name,
-                    'cross_section': w.cross_section,
-                    'color': w.color,
-                    'stripe_color': w.stripe_color,
-                    'from_connection': f"{w.from_node_id}:{w.from_pin}",
-                    'to_connection': f"{w.to_node_id}:{w.to_pin}",
-                    'part_number': w.part_number,
-                }
-                for w in self.wires
-            ],
-            'connectors': [
-                {
-                    'name': name,
-                    'part_number': conn.part_number,
-                    'pin_count': conn.pin_count,
-                    'pins': [
-                        {
-                            'number': pin_num,
-                            'wire_id': info['wire_id'],
-                            'color': info['color'],
-                            'cross_section': info['cross_section']
-                        }
-                        for pin_num, info in conn.pins.items()
-                    ]
-                }
-                for name, conn in self.connectors.items()
-            ]
-        }
-
-# ==================== INTEGRATION WITH YOUR SYSTEM ====================
-
-def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_route=False):
+    Args:
+        filepath: Path to Excel file
+        main_window: MainWindow instance
+        auto_route: Whether to auto-route wires after import
+    
+    Returns:
+        bool: Success status
     """
-    Import Excel data into topology system
-    """
+    from commands.base_command import CompoundCommand
+    from commands.connector_commands import AddConnectorCommand
+    from commands.wire_commands import AddWireCommand
+    
     importer = ExcelHarnessImporter(filepath)
+    
+    # Load and parse Excel
     if not importer.load_excel():
+        main_window.statusBar().showMessage(f"Import failed: {importer.errors[0] if importer.errors else 'Unknown error'}", 5000)
         return False
     
     importer.clean_dataframe()
-    wires_data = importer.extract_wires()
-    connectors_data = importer.extract_connectors()
+    importer.extract_wires()
+    importer.extract_connectors()
     
-    # Store import data for later routing
-    main_window.imported_wires_data = wires_data
-    main_window.imported_connectors = connectors_data
+    # Store import data for later use
+    main_window.imported_wires_data = importer.wires
+    main_window.imported_connectors = importer.connectors
+    
+    # Start undo macro for entire import
+    main_window.undo_manager.begin_macro(f"Import from {filepath}")
     
     x_pos, y_pos = 100, 100
+    max_x = 100
+    row_height = 150
+    col_width = 200
+    
+    # Track created items
+    created_connectors = []
+    created_wires = []
     
     # 1. CREATE CONNECTOR MODELS AND GRAPHICS
-    for device_name, conn_data in connectors_data.items():
+    for device_name, conn_data in importer.connectors.items():
+        # Get pin IDs and sort them
         pin_ids = list(conn_data.pins.keys())
         pin_ids.sort()
         
@@ -387,7 +404,9 @@ def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_
             gender=Gender.FEMALE,
             seal=SealType.UNSEALED,
             pins=pins_dict,
-            position=(x_pos, y_pos)
+            position=(x_pos, y_pos),
+            part_number=conn_data.part_number,
+            manufacturer=""
         )
         
         # Add to harness
@@ -395,29 +414,48 @@ def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_
         
         # Create graphics item
         connector = ConnectorItem(connector_model)
-        connector.set_topology_manager(topology_manager)
+        connector.set_topology_manager(main_window.topology_manager)
         connector.set_main_window(main_window)
         connector.create_topology_node()
         
-        main_window.scene.addItem(connector)
+        # Register with main window's graphics repository
+        main_window.register_graphics_item(connector, 'connectors')
         
-        x_pos += 200
+        # Create tree item
+        item = QTreeWidgetItem([connector.model.id])
+        item.setData(0, Qt.UserRole, connector)
+        main_window.objects_dock.connectors_tree.addTopLevelItem(item)
+        connector.tree_item = item
+        
+        # Add with undo (but command will handle the actual scene addition)
+        from commands.connector_commands import AddConnectorCommand
+        cmd = AddConnectorCommand(
+            main_window.scene, 
+            connector, 
+            QPointF(x_pos, y_pos), 
+            main_window=main_window
+        )
+        main_window.undo_manager.push(cmd)
+        
+        created_connectors.append(connector)
+        
+        # Update position for next connector
+        x_pos += col_width
         if x_pos > 800:
             x_pos = 100
-            y_pos += 200
+            y_pos += row_height
     
     # 2. CREATE WIRE MODELS AND GRAPHICS
-    from model.netlist import Netlist
-    
     netlist = Netlist()
-    topology_manager.set_netlist(netlist)
+    main_window.topology_manager.set_netlist(netlist)
     
-    for wd in wires_data:
+    for wd in importer.wires:
         # Find connector models
         from_conn_model = main_window.wiringharness.connectors.get(wd.from_node_id)
         to_conn_model = main_window.wiringharness.connectors.get(wd.to_node_id)
         
         if not from_conn_model or not to_conn_model:
+            importer.warnings.append(f"Wire {wd.wire_id}: Could not find connectors {wd.from_node_id} or {wd.to_node_id}")
             continue
         
         # Find pin models
@@ -425,19 +463,25 @@ def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_
         to_pin_model = to_conn_model.pins.get(wd.to_pin)
         
         if not from_pin_model or not to_pin_model:
+            importer.warnings.append(f"Wire {wd.wire_id}: Could not find pins {wd.from_pin} or {wd.to_pin}")
             continue
         
-        # Get graphics items
-        from_conn_graphics = from_conn_model.graphics_item
-        to_conn_graphics = to_conn_model.graphics_item
+        # Get graphics items from repository
+        from_conn_graphics = main_window.get_graphics_item(from_conn_model.id, 'connectors')
+        to_conn_graphics = main_window.get_graphics_item(to_conn_model.id, 'connectors')
         
         if not from_conn_graphics or not to_conn_graphics:
+            importer.warnings.append(f"Wire {wd.wire_id}: Could not find connector graphics")
             continue
         
         from_pin_graphics = from_conn_graphics.get_pin_by_id(from_pin_model.pid)
         to_pin_graphics = to_conn_graphics.get_pin_by_id(to_pin_model.pid)
         
-        # Determine wire type
+        if not from_pin_graphics or not to_pin_graphics:
+            importer.warnings.append(f"Wire {wd.wire_id}: Could not find pin graphics")
+            continue
+        
+        # Determine wire type based on cross section
         if wd.cross_section <= 0.35:
             wire_type = WireType.FLRY_B_0_35
         elif wd.cross_section <= 0.5:
@@ -474,16 +518,180 @@ def import_from_excel_to_topology(filepath, topology_manager, main_window, auto_
         
         # Create wire graphics
         wire = WireItem(wire_model)
+        wire.main_window = (main_window)
         wire.connect_to_pins(from_pin_graphics, to_pin_graphics)
         wire.net = net
         
-        main_window.scene.addItem(wire)
+        # Register with main window's graphics repository
+        main_window.register_graphics_item(wire, 'wires')
+        
+        # Create tree item
+        item = QTreeWidgetItem([wire.wid])
+        item.setData(0, Qt.UserRole, wire)
+        main_window.objects_dock.wires_tab.wires_tree.addTopLevelItem(item)
+        wire.tree_item = item
+        
+        # Add with undo
+        from commands.wire_commands import AddWireCommand
+        cmd = AddWireCommand(
+            main_window.scene,
+            wire,
+            from_pin_graphics,
+            to_pin_graphics,
+            main_window=main_window
+        )
+        main_window.undo_manager.push(cmd)
+        
+        created_wires.append(wire)
+        
+        # Update pin models with wire reference
+        if not from_pin_model.wire_ids:
+            from_pin_model.wire_ids = []
+        if isinstance(from_pin_model.wire_ids, list):
+            from_pin_model.wire_ids.append(wire.wid)
+        
+        if not to_pin_model.wire_ids:
+            to_pin_model.wire_ids = []
+        if isinstance(to_pin_model.wire_ids, list):
+            to_pin_model.wire_ids.append(wire.wid)
     
+    # End undo macro
+    main_window.undo_manager.end_macro()
+    
+    # Refresh views
+    main_window.refresh_tree_views()
+    main_window.refresh_connector_labels()
+    
+    # Print summary
     print(f"\n=== IMPORT COMPLETE ===")
     print(f"Connectors: {len(main_window.wiringharness.connectors)}")
     print(f"Wires: {len(main_window.wiringharness.wires)}")
+    print(f"Warnings: {len(importer.warnings)}")
+    print(f"Errors: {len(importer.errors)}")
+    
+    if importer.warnings:
+        print("\nWarnings:")
+        for w in importer.warnings[:5]:  # Show first 5
+            print(f"  - {w}")
+    
+    if importer.errors:
+        print("\nErrors:")
+        for e in importer.errors:
+            print(f"  - {e}")
+    
+    # Show status message
+    main_window.statusBar().showMessage(
+        f"Imported {len(created_connectors)} connectors, {len(created_wires)} wires", 
+        5000
+    )
+    
+    # Auto-route if requested
+    if auto_route and created_wires:
+        from utils.auto_route import HarnessAutoRouter
+        router = HarnessAutoRouter(main_window.topology_manager, main_window)
+        router.route_from_imported_data()
     
     return True
 
 
-
+def import_from_excel_with_preview(filepath, main_window):
+    """
+    Import Excel data but show preview dialog first
+    
+    Args:
+        filepath: Path to Excel file
+        main_window: MainWindow instance
+    
+    Returns:
+        bool: Success status
+    """
+    from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit, QGroupBox
+    
+    importer = ExcelHarnessImporter(filepath)
+    
+    if not importer.load_excel():
+        QMessageBox.critical(main_window, "Import Error", f"Failed to load file:\n{importer.errors[0] if importer.errors else 'Unknown error'}")
+        return False
+    
+    importer.clean_dataframe()
+    importer.extract_wires()
+    importer.extract_connectors()
+    summary = importer.generate_summary()
+    
+    # Create preview dialog
+    dialog = QDialog(main_window)
+    dialog.setWindowTitle("Import Preview")
+    dialog.setMinimumSize(600, 500)
+    
+    layout = QVBoxLayout(dialog)
+    
+    # Summary
+    summary_text = QTextEdit()
+    summary_text.setReadOnly(True)
+    summary_text.setMaximumHeight(150)
+    
+    summary_html = f"""
+    <h3>Import Summary</h3>
+    <table>
+        <tr><td><b>Wires found:</b></td><td>{summary['total_wires']}</td></tr>
+        <tr><td><b>Connectors found:</b></td><td>{summary['total_connectors']}</td></tr>
+        <tr><td><b>Unique materials:</b></td><td>{summary['unique_materials']}</td></tr>
+        <tr><td><b>Cross sections:</b></td><td>{', '.join(str(x) for x in summary['cross_sections'])}</td></tr>
+    </table>
+    """
+    
+    if summary['warnings']:
+        summary_html += "<h4>Warnings:</h4><ul>"
+        for w in summary['warnings'][:5]:
+            summary_html += f"<li>{w}</li>"
+        if len(summary['warnings']) > 5:
+            summary_html += f"<li>... and {len(summary['warnings']) - 5} more</li>"
+        summary_html += "</ul>"
+    
+    if summary['errors']:
+        summary_html += "<h4>Errors:</h4><ul style='color: red;'>"
+        for e in summary['errors']:
+            summary_html += f"<li>{e}</li>"
+        summary_html += "</ul>"
+    
+    summary_text.setHtml(summary_html)
+    layout.addWidget(summary_text)
+    
+    # Connectors table
+    conn_group = QGroupBox("Connectors to be created")
+    conn_layout = QVBoxLayout(conn_group)
+    
+    conn_table = QTableWidget()
+    conn_table.setColumnCount(3)
+    conn_table.setHorizontalHeaderLabels(["Device Name", "Pin Count", "Part Number"])
+    conn_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+    conn_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+    conn_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+    
+    conn_table.setRowCount(len(importer.connectors))
+    for i, (name, conn) in enumerate(importer.connectors.items()):
+        conn_table.setItem(i, 0, QTableWidgetItem(name))
+        conn_table.setItem(i, 1, QTableWidgetItem(str(conn.pin_count)))
+        conn_table.setItem(i, 2, QTableWidgetItem(conn.part_number))
+    
+    conn_layout.addWidget(conn_table)
+    layout.addWidget(conn_group)
+    
+    # Buttons
+    btn_layout = QHBoxLayout()
+    
+    import_btn = QPushButton("Import")
+    import_btn.clicked.connect(dialog.accept)
+    btn_layout.addWidget(import_btn)
+    
+    cancel_btn = QPushButton("Cancel")
+    cancel_btn.clicked.connect(dialog.reject)
+    btn_layout.addWidget(cancel_btn)
+    
+    layout.addLayout(btn_layout)
+    
+    # Show dialog
+    if dialog.exec_() == QDialog.Accepted:
+        return import_from_excel_to_scene(filepath, main_window)
+    
+    return False

@@ -171,6 +171,7 @@ class MainWindow(QMainWindow):
         
         # Create menus
         self._create_file_menu()
+        # self._create_edit_menu()
         self._create_tools_menu()
         self._create_test_menu()
     
@@ -250,7 +251,9 @@ class MainWindow(QMainWindow):
     def _create_file_menu(self):
         """Create file menu"""
         FileMenu(self)
-    
+    def _create_edit_menu(self):
+        """Create file menu"""
+        EditMenu(self)
     def _create_tools_menu(self):
         """Create tools menu"""
         ToolsMenu(self)
@@ -630,15 +633,15 @@ class MainWindow(QMainWindow):
     
     def import_from_excel(self):
         """Import Excel file with wires only"""
-        from utils.excel_import import import_from_excel_to_topology
+        from utils.excel_import import import_from_excel_to_scene
         
         filepath, _ = QFileDialog.getOpenFileName(
             self, "Import Wire List", "", "Excel Files (*.xlsx *.xls);;CSV Files (*.csv)"
         )
         
         if filepath:
-            success = import_from_excel_to_topology(
-                filepath, self.topology_manager, self, auto_route=False
+            success = import_from_excel_to_scene(
+                filepath,  self, auto_route=False
             )
             
             if success:
@@ -704,7 +707,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Launch Failed", f"Failed to launch connector manager:\n{str(e)}")
     
     def log_to_console(self):
-        print(self.wiringharness)
+        from dialogs.debug import AttributeViewerDialog
+        dialog = AttributeViewerDialog(self.wiringharness)
+        dialog.exec_()
+
+        # print(self.wiringharness)
         
     def show_settings(self):
         """Show settings dialog"""

@@ -205,8 +205,6 @@ class DeleteConnectorCommand(CompoundCommand):
             print(f"Connector {self.connector_id} not found in orphaned items")
             return
         
-        # Add to scene
-        self.scene.addItem(connector)
         self.main_window.wiringharness.add_connector(connector.model)
         
         # Create tree item
@@ -249,7 +247,9 @@ class DeleteConnectorCommand(CompoundCommand):
                 if isinstance(pin.model.wire_ids, list):
                     if wire.wid not in pin.model.wire_ids:
                         pin.model.wire_ids.append(wire.wid)
-
+        connector.setup_info_table()
+        # Add to scene
+        self.scene.addItem(connector)
         self.connector = connector
         # Update all affected wires
         for wire in self.connected_wires:
