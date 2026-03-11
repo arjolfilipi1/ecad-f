@@ -22,24 +22,25 @@ class PropertyEditor(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Scroll area for properties
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
+        # Remove scroll area - just use a simple layout
         self.content = QWidget()
         self.content.setObjectName("properties")
         self.content_layout = QVBoxLayout(self.content)
-        self.db_btn = None
+        self.content_layout.setContentsMargins(5, 5, 5, 5)
+        self.content.setStyleSheet("border : 3px dashed blue;")
+        # self.content_layout.setSpacing(2)
+        
         # No selection label
         self.no_selection = QLabel("No item selected")
         self.no_selection.setAlignment(Qt.AlignCenter)
         self.no_selection.setStyleSheet("color: gray; padding: 20px;")
-        self.content_layout.addWidget(self.no_selection)
+        self.content_layout.insertWidget(0, self.no_selection)
         
-        scroll.setWidget(self.content)
-        layout.addWidget(scroll)
+        layout.addWidget(self.content)
+        self.content_layout.addStretch()  # Add stretch at the end
+
     
     def set_item(self, item):
         """Set the item to edit"""
@@ -72,14 +73,18 @@ class PropertyEditor(QWidget):
             self.create_random_editor(item)
     
     def clear_content(self):
-        """Clear all property widgets"""
+        """Clear all property widgets but keep the stretch at the end"""
+        # Remove all widgets except the last stretch and no_selection
         for i in reversed(range(self.content_layout.count())):
-            widget = self.content_layout.itemAt(i).widget()
-            if widget and widget is not self.no_selection:
+            item = self.content_layout.itemAt(i)
+            if item.widget() and item.widget()  not in [self.no_selection,self.content]:
+                widget = item.widget()
+                self.content_layout.removeWidget(widget)
                 widget.deleteLater()
-        if self.db_btn is not None and not sip.isdeleted(self.db_btn):
-            self.db_btn.deleteLater()
-        self.db_btn = None
+        
+        # Hide no_selection if we're about to show properties
+        self.no_selection.hide()
+
     def add_property_row(self, layout, label, widget):
         """Helper to add a labeled row"""
         row = QWidget()
@@ -113,18 +118,18 @@ class PropertyEditor(QWidget):
         basic_layout.addRow("ID:", id_edit)
         
         # Name
-        name_edit = QLineEdit(getattr(connector_item, 'name', ''))
-        name_edit.textChanged.connect(lambda t: self.on_property_change('name', t))
+        name_edit = QLineEdit(getattr(connector_item.model, 'name', ''))
+        name_edit.editingFinished.connect(lambda : self.on_property_change('name', name_edit.text()))
         basic_layout.addRow("Name:", name_edit)
         
         # Part Number
-        part_edit = QLineEdit(getattr(connector_item, 'part_number', ''))
-        part_edit.textChanged.connect(lambda t: self.on_property_change('part_number', t))
+        part_edit = QLineEdit(getattr(connector_item.model, 'part_number', ''))
+        part_edit.editingFinished.connect(lambda : self.on_property_change('part_number', part_edit.text()))
         basic_layout.addRow("Part Number:", part_edit)
         
         # Manufacturer
-        mfg_edit = QLineEdit(getattr(connector_item, 'manufacturer', ''))
-        mfg_edit.textChanged.connect(lambda t: self.on_property_change('manufacturer', t))
+        mfg_edit = QLineEdit(getattr(connector_item.model, 'manufacturer', ''))
+        mfg_edit.editingFinished.connect(lambda t: self.on_property_change('manufacturer', mfg_edit.text()))
         basic_layout.addRow("Manufacturer:", mfg_edit)
         
         self.content_layout.addWidget(basic_group)
@@ -137,7 +142,7 @@ class PropertyEditor(QWidget):
         type_combo = QComboBox()
         for ct in ConnectorType:
             type_combo.addItem(ct.value, ct)
-        current_type = getattr(connector_item, 'connector_type', ConnectorType.OTHER)
+        current_type = getattr(connector_item.model, 'connector_type', ConnectorType.OTHER)
         type_combo.setCurrentText(current_type.value if hasattr(current_type, 'value') else str(current_type))
         type_combo.currentIndexChanged.connect(lambda i: self.on_property_change('connector_type', type_combo.currentData()))
         type_layout.addRow("Type:", type_combo)
@@ -146,7 +151,7 @@ class PropertyEditor(QWidget):
         gender_combo = QComboBox()
         for g in Gender:
             gender_combo.addItem(g.value, g)
-        current_gender = getattr(connector_item, 'gender', Gender.FEMALE)
+        current_gender = getattr(connector_item.model, 'gender', Gender.FEMALE)
         gender_combo.setCurrentText(current_gender.value if hasattr(current_gender, 'value') else str(current_gender))
         gender_combo.currentIndexChanged.connect(lambda i: self.on_property_change('gender', gender_combo.currentData()))
         type_layout.addRow("Gender:", gender_combo)
@@ -155,7 +160,7 @@ class PropertyEditor(QWidget):
         seal_combo = QComboBox()
         for s in SealType:
             seal_combo.addItem(s.value, s)
-        current_seal = getattr(connector_item, 'seal', SealType.UNSEALED)
+        current_seal = getattr(connector_item.model, 'seal', SealType.UNSEALED)
         seal_combo.setCurrentText(current_seal.value if hasattr(current_seal, 'value') else str(current_seal))
         seal_combo.currentIndexChanged.connect(lambda i: self.on_property_change('seal', seal_combo.currentData()))
         type_layout.addRow("Seal:", seal_combo)
@@ -201,7 +206,7 @@ class PropertyEditor(QWidget):
         db_layout = QHBoxLayout()
         self.db_btn = QPushButton("Select from Database")
         self.db_btn.clicked.connect(lambda: self.select_connector_from_db(connector_item))
-        db_layout.addWidget(self.db_btn)
+        self.content_layout.addWidget(self.db_btn)
         # Add database management button
         db_mgmt_btn = QPushButton("📚 Manage Database")
         db_mgmt_btn.clicked.connect(self.launch_connector_manager)
@@ -415,18 +420,37 @@ class PropertyEditor(QWidget):
         
         self.content_layout.addWidget(wires_group)
         self.content_layout.addStretch()
-    
+    def refresh(self):
+        """Refresh the property editor with current item's properties"""
+        if self.current_item is None:
+            return
+        
+        # Store current item
+        item = self.current_item
+        
+        # Block signals during refresh
+        self.blockSignals(True)
+        
+        # Clear and rebuild
+        # self.clear_content()
+        self.set_item(item)
+        
+        self.blockSignals(False)
+        self.update()
+
+        
     def on_property_change(self, property_name, value):
         """Handle property changes"""
         if self.current_item and self.main_window:
             # Store old value
-            old_value = getattr(self.current_item, property_name, None)
+            old_value = getattr(self.current_item.model, property_name, None)
             
             if old_value == value:
+                print("value not in model")
                 return
-            
+            # self.refresh()
             # Apply change immediately (for visual feedback)
-            setattr(self.current_item, property_name, value)
+            setattr(self.current_item.model, property_name, value)
             # Create undo command
             if hasattr(self.current_item, 'node_type') and self.current_item.node_type == "Connector":  # Connector
                 from commands.connector_commands import UpdateConnectorPropertiesCommand

@@ -18,7 +18,7 @@ class UndoManager:
     def push(self, command: BaseCommand):
         """Push a command onto the undo stack"""
         self.undo_stack.push(command)
-        
+        self.main_window.refresh_prop()
         # Update status bar
         self.main_window.statusBar().showMessage(
             f"Performed: {command.text()}", 2000
@@ -27,15 +27,16 @@ class UndoManager:
     def begin_macro(self, text: str):
         """Start a macro (group of commands)"""
         self.undo_stack.beginMacro(text)
-    
+        self.main_window.refresh_prop()
     def end_macro(self):
         """End current macro"""
         self.undo_stack.endMacro()
-    
+        self.main_window.refresh_prop()
     def undo(self):
         """Undo last command"""
         if self.undo_stack.canUndo():
             self.undo_stack.undo()
+            self.main_window.refresh_prop()
             self.main_window.statusBar().showMessage(
                 f"Undo: {self.undo_stack.undoText()}", 2000
             )
@@ -44,6 +45,7 @@ class UndoManager:
         """Redo last undone command"""
         if self.undo_stack.canRedo():
             self.undo_stack.redo()
+            self.main_window.refresh_prop()
             self.main_window.statusBar().showMessage(
                 f"Redo: {self.undo_stack.redoText()}", 2000
             )

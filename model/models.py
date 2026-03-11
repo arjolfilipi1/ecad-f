@@ -279,7 +279,7 @@ class Wire:
     notes: Optional[str] = None
     cross_section:Optional[float] = None
     graphics_item: Optional[any] = None
-    
+    length: float = 0.0  # length
     def __str__(self):
         return self.id
     
@@ -297,7 +297,8 @@ class Wire:
             'signal_name': self.signal_name,
             'part_number': self.part_number,
             'notes': self.notes,
-            'cross_section': self.cross_section
+            'cross_section': self.cross_section,
+            'length': self.length
         }
     
     @classmethod
@@ -315,7 +316,8 @@ class Wire:
             signal_name=data.get('signal_name'),
             part_number=data.get('part_number'),
             notes=data.get('notes'),
-            cross_section=data.get('cross_section')
+            cross_section=data.get('cross_section'),
+            length=data.get('length')
         )
 
 @dataclass

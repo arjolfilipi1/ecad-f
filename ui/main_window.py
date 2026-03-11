@@ -198,18 +198,27 @@ class MainWindow(QMainWindow):
         self.view.viewport().installEventFilter(self)
     
     # ============ UI Creation Methods ============
-    
+    def refresh_prop(self):
+        if self.property_editor is not None:
+            self.property_editor.refresh()
     def show_props(self):
         """Create and show property editor dock"""
         from graphics.property_editor import PropertyEditor
         
-        self.props = QDockWidget("Properties")
+        self.props = QDockWidget("Properties", self)
+        self.props.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        
         self.property_editor = PropertyEditor(self)
         self.props.setWidget(self.property_editor)
+        
+        # Make sure the dock widget is scrollable
+        self.props.setMinimumWidth(300)
+        
         self.addDockWidget(Qt.RightDockWidgetArea, self.props)
         
         # Connect selection changes to property editor
         self.view._scene.selectionChanged.connect(self.on_selection_changed)
+
     
     def _create_main_toolbar(self):
         """Main editing toolbar"""
