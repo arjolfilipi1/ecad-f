@@ -1,18 +1,259 @@
 # database/project_db.py - Complete rewrite
 
-import sqlite3
 import json
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 import uuid
+import shutil
+from model.models import *
 
-from model.models import (
-    WiringHarness, Connector, Wire, Node, HarnessBranch, 
-    Pin, CombinedWireColor, Gender, SealType, ConnectorType, 
-    WireType, NodeType
-)
-
+class ProjectFileHandler:
+    """Handles project file operations with .ecad extension using JSON"""
+    
+    def __init__(self):
+        self.current_project = None
+        self.current_path = None
+        self.modified = False
+    
+    def set_name(self, name):
+        if self.current_project:
+            self.current_project.name = name
+            self.modified = True
+    
+    def new_project(self, name: str = "New Project") -> WiringHarness:
+        """Create a new project"""
+        from model.models import WiringHarness
+        self.current_project = WiringHarness(name=name)
+        self.current_path = None
+        self.modified = True
+        return self.current_project
+    
+    def open_project(self, filepath: str) -> Optional[WiringHarness]:
+        """Open a .ecad project file (JSON format)"""
+        try:
+            filepath = Path(filepath)
+            if not filepath.exists():
+                print(f"File not found: {filepath}")
+                return None
+            
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Create harness from JSON data
+            self.current_project = WiringHarness.from_dict(data)
+            self.current_path = str(filepath)
+            self.modified = False
+            
+            print(f"Loaded project from {filepath}")
+            print(f"  Connectors: {len(self.current_project.connectors)}")
+            print(f"  Wires: {len(self.current_project.wires)}")
+            print(f"  Bundles: {len(self.current_project.bundles)}")
+            print(f"  Branch Points: {len(self.current_project.branch_points)}")
+            
+            return self.current_project
+            
+        except Exception as e:
+            print(f"Error opening project: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def save_project(self, filepath: str = None, main_window=None) -> bool:
+        """Save project to JSON file"""
+        if not self.current_project:
+            print("no curr")
+            return False
+        
+        save_path = filepath or self.current_path
+        if not save_path:
+            print("no path")
+            return False
+        
+        # Ensure .ecad extension
+        save_path = str(save_path)
+        if not save_path.endswith('.ecad'):
+            save_path += '.ecad'
+        
+        # Update graphics references in models before saving
+        self._update_models_from_graphics(main_window)
+        
+        try:
+            # Convert to dictionary
+            data = self.current_project.to_dict()
+            print(data)
+            # Add metadata
+            data['file_version'] = "1.0"
+            data['saved_date'] = datetime.now().isoformat()
+            data['ecad_version'] = "1.0"
+            
+            # Save to file
+            with open(save_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            self.current_path = save_path
+            print("saved")
+            self.modified = False
+            
+            print(f"Successfully saved to {save_path}")
+            print(f"  Connectors: {len(self.current_project.connectors)}")
+            print(f"  Wires: {len(self.current_project.wires)}")
+            print(f"  Bundles: {len(self.current_project.bundles)}")
+            print(f"  Branch Points: {len(self.current_project.branch_points)}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error saving project: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _update_models_from_graphics(self, main_window):
+        """Update model data from graphics items before saving"""
+        if not main_window or not self.current_project:
+            return
+        
+        # Update connector positions from graphics
+        for conn_id, conn_model in self.current_project.connectors.items():
+            if conn_model.graphics_item:
+                pos = conn_model.graphics_item.pos()
+                conn_model.position = (pos.x(), pos.y())
+                conn_model.rotation = conn_model.graphics_item.rotation()
+        
+        # Update wire data (already in models)
+        # Wire models already have correct data
+        
+        # Update bundle data from graphics
+        for bundle_id, bundle_model in self.current_project.bundles.items():
+            if bundle_model.graphics_item:
+                graphics = bundle_model.graphics_item
+                bundle_model.start_point = (graphics.start_point.x(), graphics.start_point.y())
+                bundle_model.end_point = (graphics.end_point.x(), graphics.end_point.y())
+                bundle_model.specified_length = graphics.specified_length
+                bundle_model.length = graphics.model.length
+                bundle_model.wire_count = graphics.wire_count
+                bundle_model.wire_ids = graphics.wire_ids.copy()
+        
+        # Update branch point positions
+        for bp_id, bp_model in self.current_project.branch_points.items():
+            if bp_model.graphics_item:
+                pos = bp_model.graphics_item.pos()
+                bp_model.position = (pos.x(), pos.y())
+    
+    def export_to_excel(self, filepath: str) -> bool:
+        """Export harness data to Excel"""
+        try:
+            import pandas as pd
+            from pathlib import Path
+            
+            if not self.current_project:
+                return False
+            
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                # Wires sheet
+                wires_data = []
+                for wire in self.current_project.wires.values():
+                    wires_data.append({
+                        'Wire ID': wire.id,
+                        'Signal': wire.signal_name or '',
+                        'Type': wire.type.value if wire.type else '',
+                        'Cross Section': getattr(wire, 'cross_section', 0.5),
+                        'Color': wire.color.code if hasattr(wire, 'color') else 'SW',
+                        'From': wire.from_node_id,
+                        'From Pin': wire.from_pin,
+                        'To': wire.to_node_id,
+                        'To Pin': wire.to_pin,
+                        'Length (mm)': wire.calculated_length_mm or 0,
+                        'Part Number': wire.part_number or ''
+                    })
+                
+                if wires_data:
+                    pd.DataFrame(wires_data).to_excel(writer, sheet_name='Wires', index=False)
+                
+                # Connectors sheet
+                conn_data = []
+                for conn in self.current_project.connectors.values():
+                    conn_data.append({
+                        'ID': conn.id,
+                        'Part Number': conn.part_number or '',
+                        'Name': conn.name,
+                        'Type': conn.type.value if hasattr(conn.type, 'value') else str(conn.type),
+                        'Gender': conn.gender.value if conn.gender else '',
+                        'Pin Count': len(conn.pins),
+                        'Position X': conn.position[0],
+                        'Position Y': conn.position[1]
+                    })
+                
+                if conn_data:
+                    pd.DataFrame(conn_data).to_excel(writer, sheet_name='Connectors', index=False)
+                
+                # Pins sheet
+                pins_data = []
+                for conn in self.current_project.connectors.values():
+                    for pin_num, pin in conn.pins.items():
+                        pins_data.append({
+                            'Connector': conn.id,
+                            'Pin': pin_num,
+                            'Wire ID': pin.wire_id[0] if pin.wire_id else ''
+                        })
+                
+                if pins_data:
+                    pd.DataFrame(pins_data).to_excel(writer, sheet_name='Pins', index=False)
+                
+                # Bundles sheet
+                bundles_data = []
+                for bundle in self.current_project.bundles.values():
+                    bundles_data.append({
+                        'ID': bundle.id,
+                        'Name': bundle.name,
+                        'Start X': bundle.start_point[0],
+                        'Start Y': bundle.start_point[1],
+                        'End X': bundle.end_point[0],
+                        'End Y': bundle.end_point[1],
+                        'Length': bundle.length,
+                        'Specified Length': bundle.specified_length or '',
+                        'Wire Count': bundle.wire_count,
+                        'Wire IDs': ', '.join(bundle.wire_ids)
+                    })
+                
+                if bundles_data:
+                    pd.DataFrame(bundles_data).to_excel(writer, sheet_name='Bundles', index=False)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error exporting to Excel: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def create_backup(self, filepath: str = None) -> Optional[str]:
+        """Create a backup of the current project"""
+        if not self.current_path and not filepath:
+            return None
+        
+        source = filepath or self.current_path
+        if not source:
+            return None
+        
+        source_path = Path(source)
+        backup_dir = source_path.parent / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"{source_path.stem}_backup_{timestamp}{source_path.suffix}"
+        backup_path = backup_dir / backup_name
+        
+        try:
+            shutil.copy2(source_path, backup_path)
+            print(f"Backup created: {backup_path}")
+            return str(backup_path)
+        except Exception as e:
+            print(f"Error creating backup: {e}")
+            return None
+            
+            
 class ProjectDatabase:
     """SQLite database for saving/loading harness projects"""
     
@@ -644,145 +885,4 @@ class ProjectDatabase:
             return True
         except Exception as e:
             print(f"Error deleting project: {e}")
-            return False
-
-
-class ProjectFileHandler:
-    """Handles project file operations with .ecad extension"""
-    
-    def __init__(self):
-        self.current_project = None
-        self.current_path = None
-        self.modified = False
-    def set_name(self,name):
-        self.current_project.name = name
-    def new_project(self, name: str = "New Project") -> WiringHarness:
-        """Create a new project"""
-        from model.models import WiringHarness
-        self.current_project = WiringHarness(name=name)
-        self.current_path = None
-        self.modified = True
-        return self.current_project
-    
-    def open_project(self, filepath: str) -> Optional[WiringHarness]:
-        """Open a .ecad project file"""
-        db = ProjectDatabase(filepath)
-        self.current_project = db.load_project()
-        
-        # Also load bundles data separately if needed
-        if hasattr(self, 'bundles_data'):
-            self.bundles_data = db.load_bundles()
-        
-        db.close()
-        
-        if self.current_project:
-            self.current_path = filepath
-            self.modified = False
-        
-        return self.current_project
-    
-    def save_project(self, filepath: str = None, main_window=None) -> bool:
-        """Save project to file - UPDATED to get bundles from main_window"""
-        if not self.current_project:
-            return False
-        
-        save_path = filepath or self.current_path
-        if not save_path:
-            return False
-        
-        # Ensure .ecad extension
-        if not save_path.endswith('.ecad'):
-            save_path += '.ecad'
-        
-        # Get bundles and imported wires from main window
-        bundles = []
-        imported_wires = []
-        
-        if main_window:
-            bundles = getattr(main_window, 'bundles', [])
-            imported_wires = getattr(main_window, 'imported_wire_items', [])
-            print(f"Saving {len(bundles)} bundles and {len(imported_wires)} wires")
-        
-        db = ProjectDatabase(save_path)
-        success = db.save_project(
-            self.current_project, 
-            bundles=bundles, 
-            imported_wires=imported_wires
-        )
-        db.close()
-        
-        if success:
-            self.current_path = save_path
-            self.modified = False
-            print(f"Successfully saved to {save_path}")
-        
-        return success
-
-    
-    def export_to_excel(self, filepath: str) -> bool:
-        """Export harness data to Excel"""
-        try:
-            import pandas as pd
-            from pathlib import Path
-            
-            if not self.current_project:
-                return False
-            
-            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                # Wires sheet
-                wires_data = []
-                for wire in self.current_project.wires.values():
-                    wires_data.append({
-                        'Wire ID': wire.id,
-                        'Signal': wire.signal_name or '',
-                        'Type': wire.type.value if wire.type else '',
-                        'Cross Section': getattr(wire, 'cross_section', 0.5),
-                        'Color': wire.color.code if hasattr(wire, 'color') else 'SW',
-                        'From': wire.from_node_id,
-                        'From Pin': wire.from_pin,
-                        'To': wire.to_node_id,
-                        'To Pin': wire.to_pin,
-                        'Length (mm)': wire.calculated_length_mm or 0,
-                        'Part Number': wire.part_number or ''
-                    })
-                
-                if wires_data:
-                    pd.DataFrame(wires_data).to_excel(writer, sheet_name='Wires', index=False)
-                
-                # Connectors sheet
-                conn_data = []
-                for conn in self.current_project.connectors.values():
-                    conn_data.append({
-                        'ID': conn.id,
-                        'Part Number': conn.part_number or '',
-                        'Name': conn.name,
-                        'Type': conn.type.value if hasattr(conn.type, 'value') else str(conn.type),
-                        'Gender': conn.gender.value if conn.gender else '',
-                        'Pin Count': len(conn.pins),
-                        'Position X': conn.position[0],
-                        'Position Y': conn.position[1]
-                    })
-                
-                if conn_data:
-                    pd.DataFrame(conn_data).to_excel(writer, sheet_name='Connectors', index=False)
-                
-                # Pins sheet
-                pins_data = []
-                for conn in self.current_project.connectors.values():
-                    for pin_num, pin in conn.pins.items():
-                        pins_data.append({
-                            'Connector': conn.id,
-                            'Pin': pin_num,
-                            'Wire ID': pin.wire_id or ''
-                        })
-                
-                if pins_data:
-                    pd.DataFrame(pins_data).to_excel(writer, sheet_name='Pins', index=False)
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error exporting to Excel: {e}")
-            import traceback
-            traceback.print_exc()
             return False

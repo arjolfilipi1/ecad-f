@@ -2,7 +2,7 @@
 Main window for ECAD application
 Combines all UI components and manages the main application state
 """
-
+from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow, QGraphicsScene, QDockWidget, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QShortcut,
@@ -799,18 +799,264 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"ECAD - {name}")
             self.statusBar().showMessage(f"Created new project: {name}", 3000)
     
-    def open_project(self, filepath=None):
-        """Open an existing project"""
-        filepath = filepath or self.settings_manager.get('database_path', '.')
-        ProjectController.open_project(self, filepath)
     
     def save_project(self):
         """Save current project"""
-        ProjectController.save_project(self)
-    
+        if self.project_handler.current_path:
+            # Update models before saving
+            self._update_models_before_save()
+            
+            success = self.project_handler.save_project(
+                filepath=self.project_handler.current_path,
+                main_window=self
+            )
+            if success:
+                self.undo_manager.set_clean()
+                self.statusBar().showMessage(f"Saved: {self.project_handler.current_path}", 3000)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project")
+        else:
+            self.save_project_as()
+
     def save_project_as(self):
         """Save project with new name"""
-        ProjectController.save_project_as(self)
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project As",
+            str(self.settings_manager.settings.default_path +  "/untitled.ecad"),
+            "ECAD Projects (*.ecad);;All Files (*)"
+        )
+        
+        if filepath:
+            if not filepath.endswith('.ecad'):
+                filepath += '.ecad'
+            
+            # Update models before saving
+            self._update_models_before_save()
+            
+            success = self.project_handler.save_project(
+                filepath=filepath,
+                main_window=self
+            )
+            if success:
+                self.undo_manager.set_clean()
+                self.setWindowTitle(f"ECAD - {self.project_handler.current_project.name} ({Path(filepath).name})")
+                
+                self.settings_manager.add_recent_file(filepath)
+                # self._update_recent_menu()
+                
+                self.statusBar().showMessage(f"Saved: {filepath}", 3000)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project")
+
+    def open_project(self, filepath=None):
+        """Open an existing project"""
+        if filepath is None:
+            filepath, _ = QFileDialog.getOpenFileName(
+                self,
+                "Open Project",
+                str(self.settings_manager.settings.default_path),
+                "ECAD Projects (*.ecad);;All Files (*)"
+            )
+        
+        if filepath:
+            print(f"Opening project: {filepath}")
+            
+            # Check for unsaved changes
+            if self.project_handler.modified:
+                reply = QMessageBox.question(
+                    self,
+                    "Unsaved Changes",
+                    "Current project has unsaved changes. Open anyway?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+            
+            self.clear_scene()
+            
+            # Open project
+            project = self.project_handler.open_project(filepath)
+            
+            if project:
+                # Recreate scene from loaded data
+                self._recreate_scene_from_models()
+                
+                self.setWindowTitle(f"ECAD - {project.name} ({Path(filepath).name})")
+                
+                self.settings_manager.add_recent_file(filepath)
+                # self._update_recent_menu()
+                
+                self.statusBar().showMessage(f"Loaded: {filepath}", 3000)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to load project")
+
+    def _update_models_before_save(self):
+        """Update all model data from graphics items before saving"""
+        # Update connector positions
+        for conn in self.conns:
+            if conn.model.id in self.wiringharness.connectors:
+                model = self.wiringharness.connectors[conn.model.id]
+                pos = conn.pos()
+                model.position = (pos.x(), pos.y())
+                model.rotation = conn.rotation()
+        
+        # Update bundle data
+        for bundle in self.bundles:
+            if bundle.model.id in self.wiringharness.bundles:
+                model = self.wiringharness.bundles[bundle.model.id]
+                model.start_point = (bundle.start_point.x(), bundle.start_point.y())
+                model.end_point = (bundle.end_point.x(), bundle.end_point.y())
+                model.specified_length = bundle.specified_length
+                model.wire_count = bundle.wire_count
+                model.wire_ids = bundle.wire_ids.copy()
+        
+        # Update branch points
+        for item in self.scene.items():
+            if hasattr(item, 'model') and hasattr(item.model, 'position'):
+                if item.model.id in self.wiringharness.branch_points:
+                    pos = item.pos()
+                    item.model.position = (pos.x(), pos.y())
+
+    def _recreate_scene_from_models(self):
+        """Recreate the entire scene from the wiring harness models"""
+        from graphics.connector_item import ConnectorItem
+        from graphics.wire_item import WireItem
+        from graphics.bundle_item import BundleItem
+        from graphics.topology_item import BranchPointGraphicsItem
+        from PyQt5.QtWidgets import QTreeWidgetItem
+        from PyQt5.QtCore import Qt
+        from model.netlist import Netlist
+        
+        # Clear existing scene
+        self.scene.clear()
+        self.conns = []
+        self.bundles = []
+        self.imported_wire_items = []
+        self.routed_wire_items = []
+        
+        # Recreate connectors
+        for conn_model in self.wiringharness.connectors.values():
+            conn_item = ConnectorItem(conn_model)
+            conn_item.set_topology_manager(self.topology_manager)
+            conn_item.set_main_window(self)
+            conn_item.create_topology_node()
+            conn_item.setPos(conn_model.position[0], conn_model.position[1])
+            conn_item.setRotation(conn_model.rotation)
+            
+            self.scene.addItem(conn_item)
+            self.conns.append(conn_item)
+            
+            # Create tree item
+            item = QTreeWidgetItem([conn_model.id])
+            item.setData(0, Qt.UserRole, conn_item)
+            self.objects_dock.connectors_tree.addTopLevelItem(item)
+            conn_item.tree_item = item
+            
+            # Register with repository
+            self.register_graphics_item(conn_item, 'connectors')
+        
+        # Recreate branch points
+        for bp_model in self.wiringharness.branch_points.values():
+            from model.topology import BranchPointNode
+            bp_graphics = BranchPointGraphicsItem(bp_model, self)
+            
+            # Create topology node for backward compatibility
+            bp_node = BranchPointNode(bp_model.position, bp_model.branch_type)
+            bp_node.id = bp_model.id
+            self.topology_manager.nodes[bp_model.id] = bp_node
+            bp_graphics.branch_node = bp_node
+            
+            bp_graphics.setPos(bp_model.position[0], bp_model.position[1])
+            self.scene.addItem(bp_graphics)
+            
+            # Register with repository
+            self.register_graphics_item(bp_graphics, 'branch_points')
+        
+        # Create netlist
+        netlist = Netlist()
+        self.topology_manager.set_netlist(netlist)
+        
+        # Recreate wires
+        for wire_model in self.wiringharness.wires.values():
+            # Find connector graphics
+            from_conn = None
+            to_conn = None
+            
+            for conn in self.conns:
+                if conn.model.id == wire_model.from_node_id:
+                    from_conn = conn
+                if conn.model.id == wire_model.to_node_id:
+                    to_conn = conn
+            
+            if not from_conn or not to_conn:
+                continue
+            
+            # Find pin graphics
+            from_pin = from_conn.get_pin_by_id(f"{wire_model.from_node_id}_{wire_model.from_pin}")
+            to_pin = to_conn.get_pin_by_id(f"{wire_model.to_node_id}_{wire_model.to_pin}")
+            
+            if not from_pin or not to_pin:
+                continue
+            
+            # Create wire graphics
+            wire_item = WireItem(wire_model)
+            wire_item.set_main_window(self)
+            wire_item.connect_to_pins(from_pin, to_pin)
+            
+            # Create net
+            net = netlist.connect(from_pin, to_pin)
+            wire_item.net = net
+            
+            self.scene.addItem(wire_item)
+            self.imported_wire_items.append(wire_item)
+            
+            # Create tree item
+            item = QTreeWidgetItem([wire_model.id])
+            item.setData(0, Qt.UserRole, wire_item)
+            self.objects_dock.wires_tab.wires_tree.addTopLevelItem(item)
+            wire_item.tree_item = item
+            
+            # Register with repository
+            self.register_graphics_item(wire_item, 'wires')
+        
+        # Recreate bundles
+        for bundle_model in self.wiringharness.bundles.values():
+            bundle_item = BundleItem(bundle_model, self)
+            
+            # Find start and end nodes
+            if bundle_model.start_node_id:
+                for node_id, node in self.topology_manager.nodes.items():
+                    if node.id == bundle_model.start_node_id:
+                        bundle_item.start_node = node
+                        # Find graphics for this node
+                        for item in self.scene.items():
+                            if hasattr(item, 'model') and item.model.id == node.id:
+                                bundle_item.start_item = item
+                                break
+                        break
+            
+            if bundle_model.end_node_id:
+                for node_id, node in self.topology_manager.nodes.items():
+                    if node.id == bundle_model.end_node_id:
+                        bundle_item.end_node = node
+                        # Find graphics for this node
+                        for item in self.scene.items():
+                            if hasattr(item, 'model') and item.model.id == node.id:
+                                bundle_item.end_item = item
+                                break
+                        break
+            
+            bundle_item.update_path()
+            self.scene.addItem(bundle_item)
+            self.bundles.append(bundle_item)
+            
+            # Register with repository
+            self.register_graphics_item(bundle_item, 'bundles')
+        
+        # Refresh trees
+        self.refresh_tree_views()
+        self.refresh_bundle_tree()
     
     def publish_project(self):
         """Publish current project to central database"""

@@ -646,7 +646,8 @@ class WiringHarness:
             'created_date': self.created_date.isoformat(),
             'modified_date': self.modified_date.isoformat(),
             'branch_points': {k: v.to_dict() for k, v in self.branch_points.items()},  # ADD THIS
-            'connectors': {k: v.to_dict() for k, v in self.connectors.items()},
+            # 'connectors': {k: v.to_dict() for k, v in self.connectors.items()},
+            'connectors': {k: v for k, v in self.connectors},
             'wires': {k: v.to_dict() for k, v in self.wires.items()},
             'bundles': {k: v.to_dict() for k, v in self.bundles.items()},  # ADD THIS
             'branches': {k: v.to_dict() for k, v in self.branches.items()},
