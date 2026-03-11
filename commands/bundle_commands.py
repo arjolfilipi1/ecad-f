@@ -9,38 +9,94 @@ class AddBundleCommand(BaseCommand):
         super().__init__("Add Bundle")
         self.scene = scene
         self.bundle = bundle_item
+        self.bundle_model = bundle_item.model
         self.start_point = start_point
         self.end_point = end_point
         self.main_window = main_window
         self.bundle_id = bundle_item.bundle_id
-        self.specified_length = bundle_item.specified_length
-        self.start_node = bundle_item.start_node
-        self.end_node = bundle_item.end_node
-
-        self.main_window.refresh_bundle_tree()
+        self._initialized = False
     
-    def redo(self):
-        if self.first_redo:
-            self.first_redo = False
+    def _initialize(self):
+        """First time execution"""
+        self._execute()
+    
+    def _redo(self):
+        """Subsequent redos"""
+        self._execute()
+    
+    def _execute(self):
+        """Common execution logic"""
+        # Skip if already in scene
+        if self.bundle.scene() == self.scene:
             return
         
+        # Add to scene
         self.scene.addItem(self.bundle)
-        # Add to main window bundles list
+        
+        # Add to main window's bundle list
         if hasattr(self.main_window, 'bundles'):
             self.main_window.bundles.append(self.bundle)
         
+        # Add to wiring harness
+        if hasattr(self.main_window, 'wiringharness'):
+            self.main_window.wiringharness.add_bundle(self.bundle_model)
+        
+        # Register with main window's graphics repository
+        if self.main_window:
+            self.main_window.register_graphics_item(self.bundle, 'bundles')
+        
+        # Create tree item if needed
+        if not self.bundle.tree_item:
+            from PyQt5.QtWidgets import QTreeWidgetItem
+            display_name = getattr(self.bundle, 'name', self.bundle_id)
+            item = QTreeWidgetItem([display_name])
+            item.setData(0, Qt.UserRole, self.bundle)
+            if hasattr(self.main_window, 'bundles_tree'):
+                self.main_window.bundles_tree.addTopLevelItem(item)
+            self.bundle.tree_item = item
         
         self.main_window.refresh_bundle_tree()
     
     def undo(self):
-     
-        self.scene.removeItem(self.bundle)
+        """Undo the command"""
+        # Remove from scene
+        if self.bundle.scene() == self.scene:
+            self.scene.removeItem(self.bundle)
         
-        # Remove from main window bundles list
+        # Remove from main window's bundle list
         if hasattr(self.main_window, 'bundles') and self.bundle in self.main_window.bundles:
             self.main_window.bundles.remove(self.bundle)
         
+        # Remove from wiring harness
+        if hasattr(self.main_window, 'wiringharness'):
+            self.main_window.wiringharness.remove_bundle(self.bundle_model)
+        
+        # Unregister from main window
+        if self.main_window:
+            self.main_window.unregister_graphics_item(self.bundle, 'bundles')
+        
+        # Remove tree item
+        if self.bundle.tree_item:
+            try:
+                tree = self.bundle.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    index = tree.indexOfTopLevelItem(self.bundle.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except:
+                pass
+            self.bundle.tree_item = None
+        
         self.main_window.refresh_bundle_tree()
+    
+    def redo(self):
+        """Override to use the new pattern"""
+        if not self._initialized:
+            self._initialized = True
+            self._initialize()
+        else:
+            self._redo()
+
  
 
 class DeleteBundleCommand(BaseCommand):
@@ -107,7 +163,16 @@ class UpdateBundleLengthCommand(BaseCommand):
         self.old_length = old_length
         self.new_length = new_length
     
-    def redo(self):
+    def _initialize(self):
+        """First time execution"""
+        self._redo()
+    def redo(self):  
+        if not self._initialized:
+            self._initialized = True
+            self._initialize()
+        else:
+            self._redo()
+    def _redo(self):
         self.bundle.set_specified_length(self.new_length)
         self._update_tree_text()
     

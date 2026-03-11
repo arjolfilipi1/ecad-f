@@ -510,14 +510,45 @@ class MainWindow(QMainWindow):
     def add_branch_point(self):
         """Add a branch point at mouse position"""
         from graphics.topology_item import BranchPointGraphicsItem
+        from model.models import BranchPoint
+        from commands.topology_commands import AddBranchPointCommand
         
         pos = self.view.mapToScene(self.view.mapFromGlobal(QCursor.pos()))
-        bp_node = self.topology_manager.create_branch_point((pos.x(), pos.y()))
-        bp_graphics = BranchPointGraphicsItem(bp_node)
-        self.scene.addItem(bp_graphics)
+        pos_tuple = (pos.x(), pos.y())
+        
+        # Create branch point model
+        bp_id = self.wiringharness.next_bpid()
+        bp_model = BranchPoint(
+            id=bp_id,
+            name=bp_id,
+            position=pos_tuple,
+            branch_type="split"
+        )
+        
+        # Add to harness
+        self.wiringharness.add_branch_point(bp_model)
+        
+        # Create topology node for backward compatibility
+        from model.topology import BranchPointNode
+        bp_node = BranchPointNode(pos_tuple, "split")
+        bp_node.id = bp_id
+        self.topology_manager.nodes[bp_id] = bp_node
+        
+        # Create graphics item from model
+        bp_graphics = BranchPointGraphicsItem(bp_model, self)
+        bp_graphics.branch_node = bp_node  # For backward compatibility
+        
+        # Add with undo
+        cmd = AddBranchPointCommand(
+            self.scene,
+            bp_graphics,
+            pos_tuple,
+            main_window=self
+        )
+        self.undo_manager.push(cmd)
+        
         bp_graphics.setSelected(True)
-        self.statusBar().showMessage(f"Branch point added at ({pos.x():.0f}, {pos.y():.0f})", 2000)
-    
+
     def add_junction(self):
         """Add a junction at mouse position"""
         from graphics.topology_item import JunctionGraphicsItem

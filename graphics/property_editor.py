@@ -24,22 +24,22 @@ class PropertyEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Remove scroll area - just use a simple layout
+        # Row 1: No selection label
+        self.no_selection = QLabel("No item selected")
+        self.no_selection.setAlignment(Qt.AlignCenter)
+        self.no_selection.setStyleSheet("color: gray; padding: 20px;")
+        layout.addWidget(self.no_selection) # Added first
+        
+        # Row 2: Content widget
         self.content = QWidget()
         self.content.setObjectName("properties")
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(5, 5, 5, 5)
         self.content.setStyleSheet("border : 3px dashed blue;")
-        # self.content_layout.setSpacing(2)
+        self.content_layout.setSpacing(2)
         
-        # No selection label
-        self.no_selection = QLabel("No item selected")
-        self.no_selection.setAlignment(Qt.AlignCenter)
-        self.no_selection.setStyleSheet("color: gray; padding: 20px;")
-        self.content_layout.insertWidget(0, self.no_selection)
-        
-        layout.addWidget(self.content)
-        self.content_layout.addStretch()  # Add stretch at the end
+        self.content_layout.addStretch()
+        layout.addWidget(self.content) # Added second
 
     
     def set_item(self, item):
@@ -85,14 +85,7 @@ class PropertyEditor(QWidget):
         # Hide no_selection if we're about to show properties
         self.no_selection.hide()
 
-    def add_property_row(self, layout, label, widget):
-        """Helper to add a labeled row"""
-        row = QWidget()
-        row_layout = QFormLayout(row)
-        row_layout.setContentsMargins(5, 2, 5, 2)
-        row_layout.addRow(label, widget)
-        self.content_layout.addWidget(row)
-        return widget
+    
     def create_random_editor(self, item):
         """Create editor for other items"""
         # Header
@@ -100,6 +93,7 @@ class PropertyEditor(QWidget):
         header.setStyleSheet("font-weight: bold; padding: 5px;")
         self.content_layout.addWidget(header)
         self.content_layout.addStretch()
+        
     def create_connector_editor(self, connector_item):
         """Create editor for connector properties"""
         
@@ -239,6 +233,7 @@ class PropertyEditor(QWidget):
 
         # Add stretch at end
         self.content_layout.addStretch()
+        
     def launch_connector_manager(self):
         """Launch connector manager from property editor"""
         if self.main_window:
@@ -531,6 +526,7 @@ class PropertyEditor(QWidget):
                 # Update connector info label
                 if hasattr(connector_item, 'info'):
                     connector_item.info.update_text()
+                    
     def create_bundle_editor(self, bundle_item):
         """Create editor for bundle properties"""
         # Header
@@ -543,12 +539,12 @@ class PropertyEditor(QWidget):
         basic_layout = QFormLayout(basic_group)
         
         # Bundle ID (read-only)
-        id_edit = QLineEdit(bundle_item.bundle_id)
+        id_edit = QLineEdit(bundle_item.model.id)
         id_edit.setReadOnly(True)
         basic_layout.addRow("ID:", id_edit)
         
         # Bundle Name
-        name_edit = QLineEdit(getattr(bundle_item, 'name', bundle_item.bundle_id))
+        name_edit = QLineEdit(getattr(bundle_item.model, 'name', bundle_item.model.id))
         name_edit.textChanged.connect(lambda t: self.on_bundle_property_change('name', t))
         basic_layout.addRow("Name:", name_edit)
         
@@ -562,7 +558,7 @@ class PropertyEditor(QWidget):
         self.bundle_actual_length = QDoubleSpinBox()
         self.bundle_actual_length.setRange(0, 100000)
         self.bundle_actual_length.setSuffix(" units")
-        self.bundle_actual_length.setValue(bundle_item.length)
+        self.bundle_actual_length.setValue(bundle_item.model.length)
         self.bundle_actual_length.setReadOnly(True)
         self.bundle_actual_length.setButtonSymbols(QDoubleSpinBox.NoButtons)
         length_layout.addRow("Actual:", self.bundle_actual_length)
@@ -571,7 +567,7 @@ class PropertyEditor(QWidget):
         self.bundle_specified_length = QDoubleSpinBox()
         self.bundle_specified_length.setRange(0, 100000)
         self.bundle_specified_length.setSuffix(" mm")
-        current_length = bundle_item.specified_length if bundle_item.specified_length is not None else bundle_item.length
+        current_length = bundle_item.model.specified_length if bundle_item.model.specified_length is not None else bundle_item.model.length
         self.bundle_specified_length.setValue(current_length)
         self.bundle_specified_length.valueChanged.connect(self.on_bundle_length_changed)
         length_layout.addRow("Specified:", self.bundle_specified_length)

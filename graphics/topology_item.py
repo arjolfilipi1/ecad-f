@@ -94,18 +94,24 @@ class JunctionGraphicsItem(QGraphicsEllipseItem):
 
 class BranchPointGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of a branch point"""
-    def __init__(self, branch_node: BranchPointNode):
+    def __init__(self,  model, main_window=None):
         super().__init__(-7, -7, 14, 14)
-        self.branch_node = branch_node
-        self.setPos(*branch_node.position)
+        self.model = model
+        self.model.graphics_item = self  # Set reverse reference
+        self.main_window = main_window
         self.node_type = "Branch point"
+        self.branch_node = None  # For backward compatibility
+        
+        # Set position from model
+        self.setPos(model.position[0], model.position[1])
+        
         # Enable selection and hover
         self.setFlag(self.ItemIsSelectable, True)
         self.setFlag(self.ItemIsFocusable, True)
         self.setAcceptHoverEvents(True)
         
-        # Visual properties
-        if branch_node.branch_type == "splice":
+        # Visual properties based on branch type
+        if model.branch_type == "splice":
             self.normal_brush = QBrush(QColor(200, 150, 50))
         else:
             self.normal_brush = QBrush(QColor(150, 200, 100))
@@ -120,8 +126,17 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         
         self._is_hovered = False
         self._updating = False
+        self.tree_item = None
+
     def get_node(self):
         return self.branch_node
+        
+    def set_main_window(self, window):
+        """Set reference to main window and register"""
+        self.main_window = window
+        if window:
+            window.register_graphics_item(self, 'branch_points')
+    
     def _update_connected_bundles(self):
         """Update all bundles connected to this branch point"""
         if self._updating:
@@ -131,26 +146,26 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         try:
             if hasattr(self.main_window, 'bundles'):
                 for bundle in self.main_window.bundles:
-                    if bundle.start_node == self.branch_node or bundle.end_node == self.branch_node:
+                    if (bundle.start_node and bundle.start_node.id == self.model.id) or \
+                       (bundle.end_node and bundle.end_node.id == self.model.id):
                         bundle.update_position_from_nodes()
         finally:
             self._updating = False
     
     def itemChange(self, change, value):
         if change == self.ItemPositionHasChanged:
-            self.branch_node.position = (self.pos().x(), self.pos().y())
+            # Update model position
+            self.model.position = (self.pos().x(), self.pos().y())
             
-            # Update connected segments
-            for segment in self.branch_node.connected_segments:
-                if hasattr(segment, 'graphics_item'):
-                    segment.graphics_item.update_path()
+            # Update connected segments (to be implemented)
             
-            # NEW: Update connected bundles
+            # Update connected bundles
             self._update_connected_bundles()
             
         return super().itemChange(change, value)
     
     def contextMenuEvent(self, event):
+        """Handle right-click context menu"""
         from graphics.context_menus import BranchPointContextMenu
         self.setSelected(True)
         menu = BranchPointContextMenu(self, self.main_window)
@@ -184,17 +199,27 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         self.update()
         super().hoverLeaveEvent(event)
 
-    def itemChange(self, change, value):
-        if change == self.ItemPositionHasChanged:
-            self.branch_node.position = (self.pos().x(), self.pos().y())
-            for segment in self.branch_node.connected_segments:
-                if hasattr(segment, 'graphics_item'):
-                    segment.graphics_item.update_path()
-        return super().itemChange(change, value)
     def cleanup(self):
         """Clean up branch point references"""
-        # No tree item for branch points currently, but add for future
-        pass
+        # Unregister from main window
+        if self.main_window:
+            self.main_window.unregister_graphics_item(self, 'branch_points')
+        
+        # Clear graphics item reference from model
+        if self.model:
+            self.model.graphics_item = None
+        
+        if self.tree_item:
+            try:
+                tree = self.tree_item.treeWidget()
+                if tree and not sip.isdeleted(tree):
+                    index = tree.indexOfTopLevelItem(self.tree_item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
+            except:
+                pass
+            self.tree_item = None
+
         
 class FastenerGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of a fastener point"""

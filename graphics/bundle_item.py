@@ -3,6 +3,7 @@ from PyQt5.QtGui import QPainterPath, QPen, QColor, QFont, QPainter
 from PyQt5.QtCore import Qt, QPointF, QLineF
 import math
 from typing import List
+from model.models import Bundle
 
 class BundleItem(QGraphicsPathItem):
     """Interactive bundle segment that can be drawn manually"""
@@ -13,93 +14,94 @@ class BundleItem(QGraphicsPathItem):
     SELECTED = 2
     CONNECTED = 3
     
-    def __init__(self, start_point, end_point: QPointF = None, bundle_id=None,topology_segment=None,broken = False,main_window = None):
+    def __init__(self, model: Bundle, main_window=None):
+        """
+        Create a bundle graphics item from a Bundle model.
+        
+        Args:
+            model: The Bundle model object containing all bundle data
+            main_window: Reference to main window
+        """
         super().__init__()
+        self.model = model
+        self.model.graphics_item = self  # Set reverse reference
         self.main_window = main_window
-        self.bundle_id = bundle_id or f"B{id(self)}"
-        self.start_point = start_point
-        self.end_point = end_point or start_point
+        self.node_type = "Bundle"
+        
+        # For backward compatibility during transition
+        self.bundle_id = model.id
+        self.start_point = QPointF(model.start_point[0], model.start_point[1])
+        self.end_point = QPointF(model.end_point[0], model.end_point[1])
+        self.specified_length = model.specified_length
+        self.wire_count = model.wire_count
+        self.wire_ids = model.wire_ids.copy() if model.wire_ids else []
+        
+        # Node references
         self.start_node = None
         self.end_node = None
-        self.node_type = "Bundle"
-        self.length = 0.0
-        self.specified_length = None  # User-specified length override
-        self.wire_count = 0
-        self.wire_ids = []  # Wires assigned to this bundle
-        self.broken = broken
-        # Topology integration - if a segment is provided, link to it
-        self.topology_segment = topology_segment
-        if topology_segment:
-            topology_segment.graphics_item = self
-            self.wires = topology_segment.wires  # Reference to wires in segment
-            self.wire_count = len(topology_segment.wires)
-            self.wire_ids = [w.id for w in topology_segment.wires]
-
+        self.start_item = None
+        self.end_item = None
+        
         # Visual properties
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemIsMovable, False)  # Not directly movable
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
         
         self.pen_normal = QPen(QColor(0, 150, 215), 2, Qt.DashLine)
-        self.pen_highlight = QPen(QColor(255, 215, 0), 4)  # Gold
-        self.pen_selected = QPen(QColor(255, 0, 0), 4)  # Red for selected
-        self.pen_connected = QPen(QColor(0, 200, 0), 3)  # Green when wires assigned
+        self.pen_highlight = QPen(QColor(255, 215, 0), 4)
+        self.pen_selected = QPen(QColor(255, 0, 0), 4)
+        self.pen_connected = QPen(QColor(0, 200, 0), 3)
         
         self.setPen(self.pen_normal)
-        self.setZValue(5)  # Above wires but below connectors
+        self.setZValue(5)
         
-        # Length label - ALWAYS VISIBLE now
+        # Length label - ALWAYS VISIBLE
         self.length_label = BundleLengthLabel(self)
-
         self.length_label.setPos((self.start_point + self.end_point) / 2)
-        self.length_label.setVisible(True)  # Always visible
-        self.length_label.setRotation(math.degrees(math.atan2(end_point.y()-start_point.y(), end_point.x()-start_point.x())))
+        self.length_label.setVisible(True)
         
         # Add workspace units indicator
         self.workspace_label = QGraphicsTextItem("(workspace units)", self)
         self.workspace_label.setFlag(QGraphicsItem.ItemIgnoresTransformations)
         self.workspace_label.setDefaultTextColor(QColor(150, 150, 150))
         self.workspace_label.setFont(QFont("Arial", 6))
-        self.workspace_label.setPos(
-            self.length_label.pos().x(),
-            self.length_label.pos().y() + 15
-        )
         self.workspace_label.setVisible(True)
         
         # State
         self.state = self.NORMAL
         self._is_hovered = False
         self.tree_item = None
-        self.update_path()
-        
-        # Add node tracking
-        self.start_node = None
-        self.end_node = None
-        self.start_item = None  # Graphics item at start
-        self.end_item = None    # Graphics item at end
-        
-        # Flag to prevent recursive updates
         self._updating = False
+        
+        # Update path and label
+        self.update_path()
+        self.update_label_text()
     
     def contextMenuEvent(self, event):
+        """Handle right-click context menu"""
         from graphics.context_menus import BundleContextMenu
         self.setSelected(True)
         menu = BundleContextMenu(self, self.main_window)
         menu.exec_(event.screenPos())
-
     
     def set_start_node(self, node, graphics_item=None):
         """Set the start node and optionally its graphics item"""
         self.start_node = node
         if graphics_item:
             self.start_item = graphics_item
+        # Update model
+        if node:
+            self.model.start_node_id = node.id
     
     def set_end_node(self, node, graphics_item=None):
         """Set the end node and optionally its graphics item"""
         self.end_node = node
         if graphics_item:
             self.end_item = graphics_item
+        # Update model
+        if node:
+            self.model.end_node_id = node.id
     
     def update_position_from_nodes(self):
         """Update bundle position based on connected nodes"""
@@ -116,6 +118,7 @@ class BundleItem(QGraphicsPathItem):
                 new_start = QPointF(self.start_node.position[0], self.start_node.position[1])
                 if self.start_point != new_start:
                     self.start_point = new_start
+                    self.model.start_point = (new_start.x(), new_start.y())
                     changed = True
             
             # Update end point from node
@@ -123,6 +126,7 @@ class BundleItem(QGraphicsPathItem):
                 new_end = QPointF(self.end_node.position[0], self.end_node.position[1])
                 if self.end_point != new_end:
                     self.end_point = new_end
+                    self.model.end_point = (new_end.x(), new_end.y())
                     changed = True
             
             # Update path if anything changed
@@ -132,9 +136,10 @@ class BundleItem(QGraphicsPathItem):
                 # Update any wires in this bundle
                 for wire_id in self.wire_ids:
                     # Find wire graphics and update
-                    for wire_item in getattr(self.scene(), 'selectedItems', lambda: [])():
-                        if hasattr(wire_item, 'wire') and wire_item.wire.id == wire_id:
-                            wire_item.update_path()
+                    if self.main_window:
+                        wire = self.main_window.get_graphics_item(wire_id, 'wires')
+                        if wire and hasattr(wire, 'update_path'):
+                            wire.update_path()
         finally:
             self._updating = False
 
@@ -148,7 +153,7 @@ class BundleItem(QGraphicsPathItem):
             dx = self.end_point.x() - self.start_point.x()
             dy = self.end_point.y() - self.start_point.y()
             distance = math.sqrt(dx*dx + dy*dy)
-            self.length = distance
+            self.model.length = distance
             
             if abs(dx) > 50 or abs(dy) > 50:
                 # Add slight curve for long bundles
@@ -165,29 +170,29 @@ class BundleItem(QGraphicsPathItem):
         mid_point = (self.start_point + self.end_point) / 2
         self.length_label.setPos(mid_point)
         self.workspace_label.setPos(mid_point.x(), mid_point.y() + 15)
-        if hasattr(self, 'length_label'):
-            self.length_label.setRotation(math.degrees(math.atan2(self.end_point.y()-self.start_point.y(), self.end_point.x()-self.start_point.x())))
+        
+        # Update label rotation
+        angle = math.degrees(math.atan2(
+            self.end_point.y() - self.start_point.y(), 
+            self.end_point.x() - self.start_point.x()
+        ))
+        angle = angle if -90 <= angle <= 90 else angle + 180
+        self.length_label.setRotation(angle)
+        
         self.update_label_text()
     
     def update_label_text(self):
         """Update the length label text"""
         if self.specified_length is not None:
             self.length_label.setPlainText(f"{self.specified_length:.0f} mm*")
+            self.model.specified_length = self.specified_length
         else:
-            self.length_label.setPlainText(f"{self.length:.0f} units")
-    
-    def set_end_point(self, point: QPointF):
-        """Set end point and update path"""
-        self.end_point = point
-        self.update_path()
-        if self.topology_segment:
-            # Update topology if linked
-            pass
-
+            self.length_label.setPlainText(f"{self.model.length:.0f} units")
     
     def set_specified_length(self, length: float):
         """Set user-specified length override"""
         self.specified_length = length
+        self.model.specified_length = length
         self.update_label_text()
     
     def assign_wire(self, wire_id: str):
@@ -195,27 +200,46 @@ class BundleItem(QGraphicsPathItem):
         if wire_id not in self.wire_ids:
             self.wire_ids.append(wire_id)
             self.wire_count = len(self.wire_ids)
+            self.model.wire_ids = self.wire_ids.copy()
+            self.model.wire_count = self.wire_count
             self.update_appearance()
             
             # Update tree item if exists
-            if hasattr(self, 'tree_item') and self.tree_item:
-                # Update wire count in tree display
-                display_text = self.tree_item.text(0)
-                # Update color based on wire count
+            if self.tree_item:
                 if self.wire_count > 0:
                     self.tree_item.setForeground(0, Qt.darkGreen)
                 else:
                     self.tree_item.setForeground(0, Qt.black)
-                    
+    
+    def assign_wires(self, wire_ids: List[str]):
+        """Assign multiple wires to this bundle at once"""
+        for wire_id in wire_ids:
+            if wire_id not in self.wire_ids:
+                self.wire_ids.append(wire_id)
+        
+        self.wire_count = len(self.wire_ids)
+        self.model.wire_ids = self.wire_ids.copy()
+        self.model.wire_count = self.wire_count
+        self.update_appearance()
+        
+        # Update tree item
+        if self.tree_item:
+            if self.wire_count > 0:
+                self.tree_item.setForeground(0, Qt.darkGreen)
+            else:
+                self.tree_item.setForeground(0, Qt.black)
+    
     def remove_wire(self, wire_id: str):
         """Remove a wire from this bundle"""
         if wire_id in self.wire_ids:
             self.wire_ids.remove(wire_id)
             self.wire_count = len(self.wire_ids)
+            self.model.wire_ids = self.wire_ids.copy()
+            self.model.wire_count = self.wire_count
             self.update_appearance()
             
             # Update tree item
-            if hasattr(self, 'tree_item') and self.tree_item:
+            if self.tree_item:
                 if self.wire_count > 0:
                     self.tree_item.setForeground(0, Qt.darkGreen)
                 else:
@@ -224,22 +248,6 @@ class BundleItem(QGraphicsPathItem):
     def get_wire_ids(self) -> List[str]:
         """Get list of wire IDs in this bundle"""
         return self.wire_ids.copy()
-
-    def assign_wires(self, wire_ids: List[str]):
-        """Assign multiple wires to this bundle at once"""
-        for wire_id in wire_ids:
-            if wire_id not in self.wire_ids:
-                self.wire_ids.append(wire_id)
-        
-        self.wire_count = len(self.wire_ids)
-        self.update_appearance()
-        
-        # Update tree item
-        if hasattr(self, 'tree_item') and self.tree_item:
-            if self.wire_count > 0:
-                self.tree_item.setForeground(0, Qt.darkGreen)
-            else:
-                self.tree_item.setForeground(0, Qt.black)
 
     def update_appearance(self):
         """Update visual appearance based on state"""
@@ -251,24 +259,14 @@ class BundleItem(QGraphicsPathItem):
             self.setPen(self.pen_connected)
         else:
             self.setPen(self.pen_normal)
-
         
         # Update length label to show wire count
         if hasattr(self, 'length_label'):
             if self.specified_length is not None:
                 self.length_label.setPlainText(f"{self.specified_length:.0f} mm* ({self.wire_count})")
             else:
-                self.length_label.setPlainText(f"{self.length:.0f} units ({self.wire_count})")
-            self.length_label.setRotation(math.degrees(math.atan2(self.end_point.y()-self.start_point.y(), self.end_point.x()-self.start_point.x())))
-        """Update visual appearance based on state"""
-        if self.state == self.SELECTED:
-            self.setPen(self.pen_selected)
-        elif self.state == self.HIGHLIGHTED:
-            self.setPen(self.pen_highlight)
-        elif self.wire_count > 0:
-            self.setPen(self.pen_connected)
-        else:
-            self.setPen(self.pen_normal)
+                self.length_label.setPlainText(f"{self.model.length:.0f} units ({self.wire_count})")
+    
     def hoverEnterEvent(self, event):
         self._is_hovered = True
         self.state = self.HIGHLIGHTED
@@ -333,8 +331,19 @@ class BundleItem(QGraphicsPathItem):
         
         painter.drawPath(arrow_path)
         painter.restore()
+    
+    def set_main_window(self, window):
+        """Set reference to main window and register"""
+        self.main_window = window
+        if window:
+            window.register_graphics_item(self, 'bundles')
+    
     def cleanup(self):
         """Clean up references"""
+        # Unregister from main window
+        if self.main_window:
+            self.main_window.unregister_graphics_item(self, 'bundles')
+        
         if self.tree_item:
             try:
                 tree = self.tree_item.treeWidget()
@@ -345,6 +354,10 @@ class BundleItem(QGraphicsPathItem):
             except:
                 pass
             self.tree_item = None
+        
+        # Clear graphics item reference from model
+        if self.model:
+            self.model.graphics_item = None
 
 
 class BundleLengthLabel(QGraphicsTextItem):
@@ -374,4 +387,3 @@ class BundleLengthLabel(QGraphicsTextItem):
         painter.drawText(rect, Qt.AlignCenter, self.toPlainText())
         
         painter.restore()
-

@@ -37,9 +37,30 @@ class TopologyManager:
     
     def create_branch_point(self, position, bp_type="split") -> BranchPointNode:
         """Create a new branch point"""
-        bp = BranchPointNode(position, bp_type)
-        self.nodes[bp.id] = bp
-        return bp
+        from model.models import BranchPoint
+    
+        # Generate ID
+        bp_id = self.main_window.wiringharness.next_bpid()
+        
+        # Create model
+        bp_model = BranchPoint(
+            id=bp_id,
+            name=bp_id,
+            position=position,
+            branch_type=bp_type
+        )
+        
+        # Add to harness
+        self.main_window.wiringharness.add_branch_point(bp_model)
+        
+        # Create topology node (for backward compatibility)
+        from model.topology import BranchPointNode
+        bp_node = BranchPointNode(position, bp_type)
+        bp_node.id = bp_id
+        self.nodes[bp_node.id] = bp_node
+        
+        return bp_node
+
     
     def create_junction(self, position) -> JunctionNode:
         """Create a new junction"""

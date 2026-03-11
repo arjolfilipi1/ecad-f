@@ -492,7 +492,83 @@ class HarnessBranch:
             node_ids=data.get('node_ids', []),
             wire_ids=data.get('wire_ids', [])
         )
+@dataclass
+class Bundle:
+    """Represents a bundle in the harness"""
+    id: str
+    name: str = ""
+    start_point: Tuple[float, float] = (0.0, 0.0)
+    end_point: Tuple[float, float] = (0.0, 0.0)
+    start_node_id: Optional[str] = None
+    end_node_id: Optional[str] = None
+    specified_length: Optional[float] = None
+    length: float = 0.0
+    wire_count: int = 0
+    wire_ids: List[str] = field(default_factory=list)
+    auto_created: bool = False
+    graphics_item: Optional[any] = None
+    
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'start_point': self.start_point,
+            'end_point': self.end_point,
+            'start_node_id': self.start_node_id,
+            'end_node_id': self.end_node_id,
+            'specified_length': self.specified_length,
+            'length': self.length,
+            'wire_count': self.wire_count,
+            'wire_ids': self.wire_ids,
+            'auto_created': self.auto_created
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Bundle':
+        return cls(
+            id=data['id'],
+            name=data.get('name', data['id']),
+            start_point=tuple(data.get('start_point', (0, 0))),
+            end_point=tuple(data.get('end_point', (0, 0))),
+            start_node_id=data.get('start_node_id'),
+            end_node_id=data.get('end_node_id'),
+            specified_length=data.get('specified_length'),
+            length=data.get('length', 0.0),
+            wire_count=data.get('wire_count', 0),
+            wire_ids=data.get('wire_ids', []),
+            auto_created=data.get('auto_created', False))
 
+@dataclass
+class BranchPoint:
+    """Represents a branch point in the harness topology"""
+    id: str
+    name: str = ""
+    position: Tuple[float, float] = (0.0, 0.0)
+    branch_type: str = "split"  # "split", "merge", "splice"
+    node_id: Optional[str] = None  # Reference to topology node
+    connected_segments: List[str] = field(default_factory=list)  # IDs of connected segments
+    graphics_item: Optional[any] = None
+    
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'position': self.position,
+            'branch_type': self.branch_type,
+            'node_id': self.node_id,
+            'connected_segments': self.connected_segments
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'BranchPoint':
+        return cls(
+            id=data['id'],
+            name=data.get('name', data['id']),
+            position=tuple(data.get('position', (0, 0))),
+            branch_type=data.get('branch_type', 'split'),
+            node_id=data.get('node_id'),
+            connected_segments=data.get('connected_segments', [])
+        )
 
 @dataclass
 class WiringHarness:
@@ -504,9 +580,10 @@ class WiringHarness:
     revision: str = "1.0"
     created_date: datetime = field(default_factory=datetime.now)
     modified_date: datetime = field(default_factory=datetime.now)
-    
+    branch_points: Dict[str, BranchPoint] = field(default_factory=dict)  # ADD THIS
     connectors: Dict[str, Connector] = field(default_factory=dict)
     wires: Dict[str, Wire] = field(default_factory=dict)
+    bundles: Dict[str, Bundle] = field(default_factory=dict)  # ADD THIS
     branches: Dict[str, HarnessBranch] = field(default_factory=dict)
     protections: Dict[str, BranchProtection] = field(default_factory=dict)
     nodes: Dict[str, Node] = field(default_factory=dict)
@@ -514,18 +591,52 @@ class WiringHarness:
     def add_connector(self, connector: Connector) -> None:
         self.connectors[connector.id] = connector
         self.modified_date = datetime.now()
+    
     def remove_connector(self, connector: Connector) -> None:
         del self.connectors[connector.id]
         self.modified_date = datetime.now()
+    
     def add_wire(self, wire: Wire) -> None:
         self.wires[wire.id] = wire
         self.modified_date = datetime.now()
     
+    def add_bundle(self, bundle: Bundle) -> None:
+        """Add a bundle to the harness"""
+        self.bundles[bundle.id] = bundle
+        self.modified_date = datetime.now()
+        
+    def add_branch_point(self, branch_point: BranchPoint) -> None:
+        """Add a branch point to the harness"""
+        self.branch_points[branch_point.id] = branch_point
+        self.modified_date = datetime.now()
+    
+    def remove_branch_point(self, branch_point: BranchPoint) -> None:
+        """Remove a branch point from the harness"""
+        if branch_point.id in self.branch_points:
+            del self.branch_points[branch_point.id]
+            self.modified_date = datetime.now()
+
+    def remove_bundle(self, bundle: Bundle) -> None:
+        """Remove a bundle from the harness"""
+        if bundle.id in self.bundles:
+            del self.bundles[bundle.id]
+            self.modified_date = datetime.now()
+    
     def add_branch(self, branch: HarnessBranch) -> None:
         self.branches[branch.id] = branch
         self.modified_date = datetime.now()
-    def next_cid(self)-> str:
-        return "C"+str(next(self._ids))
+    
+    def next_cid(self) -> str:
+        return "C" + str(next(self._ids))
+    
+    def next_bpid(self) -> str:
+        """Generate next branch point ID"""
+        return "BP" + str(next(self._ids))
+
+    def next_bid(self) -> str:
+        """Generate next bundle ID"""
+        return "B" + str(next(self._ids))
+    
     def to_dict(self) -> dict:
         return {
             'id': self.id,
@@ -534,8 +645,10 @@ class WiringHarness:
             'revision': self.revision,
             'created_date': self.created_date.isoformat(),
             'modified_date': self.modified_date.isoformat(),
+            'branch_points': {k: v.to_dict() for k, v in self.branch_points.items()},  # ADD THIS
             'connectors': {k: v.to_dict() for k, v in self.connectors.items()},
             'wires': {k: v.to_dict() for k, v in self.wires.items()},
+            'bundles': {k: v.to_dict() for k, v in self.bundles.items()},  # ADD THIS
             'branches': {k: v.to_dict() for k, v in self.branches.items()},
             'protections': {k: v.to_dict() for k, v in self.protections.items()},
             'nodes': {k: v.to_dict() for k, v in self.nodes.items()}
@@ -558,9 +671,15 @@ class WiringHarness:
         for k, v in data.get('wires', {}).items():
             harness.wires[k] = Wire.from_dict(v)
         
+        for k, v in data.get('bundles', {}).items():  # ADD THIS
+            harness.bundles[k] = Bundle.from_dict(v)
+        
         for k, v in data.get('branches', {}).items():
             harness.branches[k] = HarnessBranch.from_dict(v)
         
+        for k, v in data.get('branch_points', {}).items():  # ADD THIS
+            harness.branch_points[k] = BranchPoint.from_dict(v)
+
         for k, v in data.get('protections', {}).items():
             harness.protections[k] = BranchProtection.from_dict(v)
         
@@ -568,15 +687,4 @@ class WiringHarness:
             harness.nodes[k] = Node.from_dict(v)
         
         return harness
-    
-    def save_to_file(self, filename: str) -> None:
-        """Save harness to JSON file"""
-        with open(filename, 'w') as f:
-            json.dump(self.to_dict(), f, indent=2)
-    
-    @classmethod
-    def load_from_file(cls, filename: str) -> 'WiringHarness':
-        """Load harness from JSON file"""
-        with open(filename, 'r') as f:
-            data = json.load(f)
-        return cls.from_dict(data)
+

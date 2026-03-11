@@ -1,25 +1,83 @@
 from .base_command import BaseCommand, CompoundCommand
 
 class AddBranchPointCommand(BaseCommand):
-    """Add a branch point to the scene"""
+    """Add a new branch point to the scene"""
     
-    def __init__(self, scene, branch_point_item, pos: tuple):
-        super().__init__("Add Branch Point")
+    def __init__(self, scene, branch_point_item, pos: tuple, description="Add Branch Point", main_window=None):
+        super().__init__(description)
         self.scene = scene
         self.branch_point = branch_point_item
+        self.branch_point_model = branch_point_item.model
         self.pos = pos
-        self.bp_id = branch_point_item.branch_node.id
+        self.main_window = main_window
+        self.bp_id = branch_point_item.model.id
+        self._initialized = False
     
-    def redo(self):
-        if self.first_redo:
-            self.first_redo = False
+    def _initialize(self):
+        """First time execution"""
+        self._execute()
+    
+    def _redo(self):
+        """Subsequent redos"""
+        self._execute()
+    
+    def _execute(self):
+        """Common execution logic"""
+        # Skip if already in scene
+        if self.branch_point.scene() == self.scene:
             return
         
-        self.branch_point.setPos(*self.pos)
+        # Set position
+        self.branch_point.setPos(self.pos[0], self.pos[1])
+        
+        # Add to scene
         self.scene.addItem(self.branch_point)
+        
+        # Add to topology manager (for backward compatibility)
+        if hasattr(self.main_window, 'topology_manager'):
+            self.main_window.topology_manager.nodes[self.branch_point_model.id] = self.branch_point.branch_node
+        
+        # Add to wiring harness
+        if hasattr(self.main_window, 'wiringharness'):
+            self.main_window.wiringharness.add_branch_point(self.branch_point_model)
+        
+        # Register with main window's graphics repository
+        if self.main_window:
+            self.main_window.register_graphics_item(self.branch_point, 'branch_points')
+        
+        self.main_window.statusBar().showMessage(
+            f"Branch point added at ({self.pos[0]:.0f}, {self.pos[1]:.0f})", 2000
+        )
     
     def undo(self):
-        self.scene.removeItem(self.branch_point)
+        """Undo the command"""
+        # Remove from scene
+        if self.branch_point.scene() == self.scene:
+            self.scene.removeItem(self.branch_point)
+        
+        # Remove from topology manager
+        if hasattr(self.main_window, 'topology_manager'):
+            if self.branch_point_model.id in self.main_window.topology_manager.nodes:
+                del self.main_window.topology_manager.nodes[self.branch_point_model.id]
+        
+        # Remove from wiring harness
+        if hasattr(self.main_window, 'wiringharness'):
+            self.main_window.wiringharness.remove_branch_point(self.branch_point_model)
+        
+        # Unregister from main window
+        if self.main_window:
+            self.main_window.unregister_graphics_item(self.branch_point, 'branch_points')
+        
+        self.main_window.statusBar().showMessage(f"Branch point removed", 2000)
+    
+    def redo(self):
+        """Override to use the new pattern"""
+        if not self._initialized:
+            self._initialized = True
+            self._initialize()
+        else:
+            self._redo()
+
 
 
 class AddSegmentCommand(BaseCommand):

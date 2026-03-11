@@ -294,7 +294,9 @@ class BundleDrawTool(QObject):
     
     def create_bundle_segment(self, end_pos, specified_length=None):
         """Create a bundle segment from current start to end position"""
-        
+        from model.models import Bundle
+        from graphics.bundle_item import BundleItem
+
         # Check if end point is on an existing item
         items = self.scene.items(end_pos)
         end_item = None
@@ -315,7 +317,7 @@ class BundleDrawTool(QObject):
                 end_node = end_item.junction_node
             elif isinstance(end_item, FastenerGraphicsItem):
                 end_node = end_item.fastener_node
-            end_pos = end_item.pos()  # Use exact position
+            end_pos = end_item.pos()
         elif self.auto_create_nodes:
             # Create new branch point at end position
             from model.topology import BranchPointNode
@@ -328,17 +330,26 @@ class BundleDrawTool(QObject):
             end_node = node
             end_item = graphics
         
-        # Create the bundle
-        bundle = BundleItem(start_point = self.current_segment_start, end_point = end_pos,main_window = self.main_window)
+        # Create bundle model
+        bundle_id = self.main_window.wiringharness.next_bid()
+        bundle_model = Bundle(
+            id=bundle_id,
+            name=bundle_id,
+            start_point=(self.current_segment_start.x(), self.current_segment_start.y()),
+            end_point=(end_pos.x(), end_pos.y()),
+            specified_length=specified_length,
+            auto_created=False
+        )
         
-        # Set length if specified
-        if specified_length is not None:
-            bundle.set_specified_length(specified_length)
+        # Add to harness
+        self.main_window.wiringharness.add_bundle(bundle_model)
+        
+        # Create bundle graphics from model
+        bundle = BundleItem(bundle_model, self.main_window)
         
         # Store node references with graphics items
-        bundle.set_start_node(self.current_start_item.get_node(),self.current_start_item)
-        bundle.set_end_node( end_node,end_item)
-        # print("set",bundle.start_node,bundle.end_node,bundle.start_item,bundle.end_item)
+        bundle.set_start_node(self.current_start_item.get_node(), self.current_start_item)
+        bundle.set_end_node(end_node, end_item)
         
         # Add to scene using undo command
         from commands.bundle_commands import AddBundleCommand
@@ -350,11 +361,8 @@ class BundleDrawTool(QObject):
             self.main_window
         )
         self.main_window.undo_manager.push(cmd)
-        self.main_window.bundles.append(bundle)
-        self.main_window.scene.addItem(bundle)
-        self.main_window.refresh_bundle_tree()
         
-        # Store in pending segments for potential undo grouping
+        # Store in pending segments
         self.pending_segments.append(bundle)
         
         # Prepare for next segment
@@ -362,7 +370,7 @@ class BundleDrawTool(QObject):
         self.current_start_node = end_node
         self.current_start_item = end_item
         
-        # Update preview line to start from new position
+        # Update preview line
         if self.preview_line:
             self.preview_line.setLine(
                 end_pos.x(), end_pos.y(),
@@ -372,6 +380,7 @@ class BundleDrawTool(QObject):
         self.main_window.statusBar().showMessage(
             f"Bundle segment created - click to continue, Right-click to finish", 1000
         )
+
     
     def finish_polyline(self):
         """Finish the polyline (don't create last segment)"""
