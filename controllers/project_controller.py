@@ -19,7 +19,7 @@ class ProjectController:
     
     @staticmethod
     def open_project(main_window, filepath=None):
-        """Open an existing project from .ecad file"""
+        """Open an existing project from .ecad file (JSON format)"""
         if filepath is None:
             filepath, _ = QFileDialog.getOpenFileName(
                 main_window,
@@ -31,27 +31,74 @@ class ProjectController:
         if filepath:
             print(f"Opening project: {filepath}")
             
+            # Check for unsaved changes
+            if main_window.project_handler.modified:
+                reply = QMessageBox.question(
+                    main_window,
+                    "Unsaved Changes",
+                    "Current project has unsaved changes. Open anyway?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+            
             main_window.clear_scene()
             
+            # Open project using the handler
             project = main_window.project_handler.open_project(filepath)
             
             if project:
-                ProjectController._load_project_to_scene(main_window, project)
-                ProjectController._load_bundles_from_project(main_window, filepath)
+                # Recreate scene from loaded models
+                main_window._recreate_scene_from_models()
                 
+                # Update window title
                 main_window.setWindowTitle(f"ECAD - {project.name} ({Path(filepath).name})")
                 
+                # Add to recent files
                 main_window.settings_manager.add_recent_file(filepath)
                 main_window._update_recent_menu()
                 
                 main_window.statusBar().showMessage(f"Loaded: {filepath}", 3000)
+                
+                # Refresh all views
+                main_window.refresh_tree_views()
+                main_window.refresh_bundle_tree()
+                
+                print(f"Successfully loaded project: {project.name}")
+                print(f"  Connectors: {len(project.connectors)}")
+                print(f"  Wires: {len(project.wires)}")
+                print(f"  Bundles: {len(project.bundles)}")
+                print(f"  Branch Points: {len(project.branch_points)}")
             else:
                 QMessageBox.critical(main_window, "Error", "Failed to load project")
+    
+    @staticmethod
+    def open_recent(main_window, filepath):
+        """Open a recent file"""
+        if Path(filepath).exists():
+            ProjectController.open_project(main_window, filepath)
+        else:
+            # Remove from recent files if it doesn't exist
+            recent_files = main_window.settings_manager.get_recent_files()
+            if filepath in recent_files:
+                recent_files.remove(filepath)
+                main_window.settings_manager.settings.recent_files = recent_files
+                main_window.settings_manager.save()
+                main_window._update_recent_menu()
+            
+            QMessageBox.warning(
+                main_window, 
+                "File Not Found", 
+                f"File not found:\n{filepath}\n\nIt has been removed from recent files."
+            )
     
     @staticmethod
     def save_project(main_window):
         """Save current project"""
         if main_window.project_handler.current_path:
+            # Update models before saving
+            main_window._update_models_before_save()
+            
             success = main_window.project_handler.save_project(
                 filepath=main_window.project_handler.current_path,
                 main_window=main_window
@@ -70,19 +117,16 @@ class ProjectController:
         filepath, _ = QFileDialog.getSaveFileName(
             main_window,
             "Save Project As",
-            str(main_window.settings_manager.settings.default_path + "/untitled.ecad"),
+            str(main_window.settings_manager.settings.default_path / "untitled.ecad"),
             "ECAD Projects (*.ecad);;All Files (*)"
         )
         
         if filepath:
-            bundles = getattr(main_window, 'bundles', [])
-            print(f"ProjectController.save_project_as: Found {len(bundles)} bundles")
-            
             if not filepath.endswith('.ecad'):
                 filepath += '.ecad'
             
-            project = ProjectController._create_project_from_scene(main_window)
-            main_window.project_handler.current_project = project
+            # Update models before saving
+            main_window._update_models_before_save()
             
             success = main_window.project_handler.save_project(
                 filepath=filepath,
@@ -90,7 +134,7 @@ class ProjectController:
             )
             if success:
                 main_window.undo_manager.set_clean()
-                main_window.setWindowTitle(f"ECAD - {project.name} ({Path(filepath).name})")
+                main_window.setWindowTitle(f"ECAD - {main_window.project_handler.current_project.name} ({Path(filepath).name})")
                 
                 main_window.settings_manager.add_recent_file(filepath)
                 main_window._update_recent_menu()
@@ -98,6 +142,9 @@ class ProjectController:
                 main_window.statusBar().showMessage(f"Saved: {filepath}", 3000)
             else:
                 QMessageBox.critical(main_window, "Error", "Failed to save project")
+
+    
+
     
     @staticmethod
     def publish_project(main_window):
@@ -622,9 +669,7 @@ class ProjectController:
     def _load_project_to_scene(main_window, project):
         """Load project data into scene"""
         main_window.scene.clear()
-        main_window.conns = []
-        main_window.wires = []
-        main_window.imported_wire_items = []
+        
         
         for conn_id, connector in project.connectors.items():
             pin_ids = list(connector.pins.keys())

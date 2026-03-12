@@ -11,23 +11,24 @@ from model.models import *
 class ProjectFileHandler:
     """Handles project file operations with .ecad extension using JSON"""
     
-    def __init__(self):
-        self.current_project = None
+    def __init__(self,main_window):
+        self.main_window = main_window
+        self.current_project = main_window.wiringharness
         self.current_path = None
         self.modified = False
     
     def set_name(self, name):
-        if self.current_project:
-            self.current_project.name = name
+        if self.main_window.wiringharness:
+            self.main_window.wiringharness.name = name
             self.modified = True
     
     def new_project(self, name: str = "New Project") -> WiringHarness:
         """Create a new project"""
         from model.models import WiringHarness
-        self.current_project = WiringHarness(name=name)
+        self.main_window.wiringharness = WiringHarness(name=name)
         self.current_path = None
         self.modified = True
-        return self.current_project
+        return self.main_window.wiringharness
     
     def open_project(self, filepath: str) -> Optional[WiringHarness]:
         """Open a .ecad project file (JSON format)"""
@@ -37,31 +38,46 @@ class ProjectFileHandler:
                 print(f"File not found: {filepath}")
                 return None
             
+            # Read JSON file
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
+            # Validate file version
+            file_version = data.get('file_version', '1.0')
+            if file_version != '1.0':
+                print(f"Warning: File version {file_version} may not be fully compatible")
+            
             # Create harness from JSON data
-            self.current_project = WiringHarness.from_dict(data)
+            self.main_window.wiringharness = WiringHarness.from_dict(data)
             self.current_path = str(filepath)
             self.modified = False
             
-            print(f"Loaded project from {filepath}")
-            print(f"  Connectors: {len(self.current_project.connectors)}")
-            print(f"  Wires: {len(self.current_project.wires)}")
-            print(f"  Bundles: {len(self.current_project.bundles)}")
-            print(f"  Branch Points: {len(self.current_project.branch_points)}")
+            print(f"Successfully loaded project from {filepath}")
+            print(f"  File version: {file_version}")
+            print(f"  Project: {self.main_window.wiringharness.name}")
+            print(f"  Connectors: {len(self.main_window.wiringharness.connectors)}")
+            print(f"  Wires: {len(self.main_window.wiringharness.wires)}")
+            print(f"  Bundles: {len(self.main_window.wiringharness.bundles)}")
+            print(f"  Branch Points: {len(self.main_window.wiringharness.branch_points)}")
             
-            return self.current_project
+            return self.main_window.wiringharness
             
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON file: {e}")
+            return None
+        except KeyError as e:
+            print(f"Missing required field in project file: {e}")
+            return None
         except Exception as e:
             print(f"Error opening project: {e}")
             import traceback
             traceback.print_exc()
             return None
+
     
     def save_project(self, filepath: str = None, main_window=None) -> bool:
         """Save project to JSON file"""
-        if not self.current_project:
+        if not self.main_window.wiringharness:
             print("no curr")
             return False
         
@@ -77,10 +93,11 @@ class ProjectFileHandler:
         
         # Update graphics references in models before saving
         self._update_models_from_graphics(main_window)
-        
+        self.current_project = main_window.wiringharness
+        print(self.current_project)
         try:
             # Convert to dictionary
-            data = self.current_project.to_dict()
+            data = self.main_window.wiringharness.to_dict()
             print(data)
             # Add metadata
             data['file_version'] = "1.0"
@@ -96,10 +113,10 @@ class ProjectFileHandler:
             self.modified = False
             
             print(f"Successfully saved to {save_path}")
-            print(f"  Connectors: {len(self.current_project.connectors)}")
-            print(f"  Wires: {len(self.current_project.wires)}")
-            print(f"  Bundles: {len(self.current_project.bundles)}")
-            print(f"  Branch Points: {len(self.current_project.branch_points)}")
+            print(f"  Connectors: {len(self.main_window.wiringharness.connectors)}")
+            print(f"  Wires: {len(self.main_window.wiringharness.wires)}")
+            print(f"  Bundles: {len(self.main_window.wiringharness.bundles)}")
+            print(f"  Branch Points: {len(self.main_window.wiringharness.branch_points)}")
             
             return True
             
@@ -111,11 +128,11 @@ class ProjectFileHandler:
     
     def _update_models_from_graphics(self, main_window):
         """Update model data from graphics items before saving"""
-        if not main_window or not self.current_project:
+        if not main_window or not self.main_window.wiringharness:
             return
         
         # Update connector positions from graphics
-        for conn_id, conn_model in self.current_project.connectors.items():
+        for conn_id, conn_model in self.main_window.wiringharness.connectors.items():
             if conn_model.graphics_item:
                 pos = conn_model.graphics_item.pos()
                 conn_model.position = (pos.x(), pos.y())
@@ -125,7 +142,7 @@ class ProjectFileHandler:
         # Wire models already have correct data
         
         # Update bundle data from graphics
-        for bundle_id, bundle_model in self.current_project.bundles.items():
+        for bundle_id, bundle_model in self.main_window.wiringharness.bundles.items():
             if bundle_model.graphics_item:
                 graphics = bundle_model.graphics_item
                 bundle_model.start_point = (graphics.start_point.x(), graphics.start_point.y())
@@ -136,7 +153,7 @@ class ProjectFileHandler:
                 bundle_model.wire_ids = graphics.wire_ids.copy()
         
         # Update branch point positions
-        for bp_id, bp_model in self.current_project.branch_points.items():
+        for bp_id, bp_model in self.main_window.wiringharness.branch_points.items():
             if bp_model.graphics_item:
                 pos = bp_model.graphics_item.pos()
                 bp_model.position = (pos.x(), pos.y())
@@ -147,13 +164,13 @@ class ProjectFileHandler:
             import pandas as pd
             from pathlib import Path
             
-            if not self.current_project:
+            if not self.main_window.wiringharness:
                 return False
             
             with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
                 # Wires sheet
                 wires_data = []
-                for wire in self.current_project.wires.values():
+                for wire in self.main_window.wiringharness.wires.values():
                     wires_data.append({
                         'Wire ID': wire.id,
                         'Signal': wire.signal_name or '',
@@ -173,7 +190,7 @@ class ProjectFileHandler:
                 
                 # Connectors sheet
                 conn_data = []
-                for conn in self.current_project.connectors.values():
+                for conn in self.main_window.wiringharness.connectors.values():
                     conn_data.append({
                         'ID': conn.id,
                         'Part Number': conn.part_number or '',
@@ -190,12 +207,12 @@ class ProjectFileHandler:
                 
                 # Pins sheet
                 pins_data = []
-                for conn in self.current_project.connectors.values():
+                for conn in self.main_window.wiringharness.connectors.values():
                     for pin_num, pin in conn.pins.items():
                         pins_data.append({
                             'Connector': conn.id,
                             'Pin': pin_num,
-                            'Wire ID': pin.wire_id[0] if pin.wire_id else ''
+                            'Wire ID': pin.wire_ids[0] if pin.wire_ids else ''
                         })
                 
                 if pins_data:
@@ -203,7 +220,7 @@ class ProjectFileHandler:
                 
                 # Bundles sheet
                 bundles_data = []
-                for bundle in self.current_project.bundles.values():
+                for bundle in self.main_window.wiringharness.bundles.values():
                     bundles_data.append({
                         'ID': bundle.id,
                         'Name': bundle.name,
@@ -329,7 +346,7 @@ class ProjectDatabase:
                 connector_id TEXT,
                 pin_number TEXT,
                 original_id TEXT,
-                wire_id TEXT,
+                wire_ids TEXT,
                 FOREIGN KEY (connector_id) REFERENCES connectors(id)
             )
         ''')
@@ -529,14 +546,14 @@ class ProjectDatabase:
         for pin in connector.pins.values():
             cursor.execute('''
                 INSERT INTO pins (
-                    id, connector_id, pin_number, original_id, wire_id
+                    id, connector_id, pin_number, original_id, wire_ids
                 ) VALUES (?, ?, ?, ?, ?)
             ''', (
                 f"{connector.id}_{pin.number}",
                 connector.id,
                 pin.number,
                 pin.number,
-                pin.wire_id
+                pin.wire_ids
             ))
     
     def _save_node(self, cursor, node):

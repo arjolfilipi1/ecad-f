@@ -167,10 +167,23 @@ class SettingsManager:
         self.settings.recent_files = self.settings.recent_files[:self.settings.max_recent_files]
         
         self.save()
+
     
     def get_recent_files(self) -> list:
-        """Get list of recent files"""
-        return [f for f in self.settings.recent_files if Path(f).exists()]
+        """Get list of recent files (only those that still exist)"""
+        # Filter out files that don't exist
+        existing_files = []
+        for f in self.settings.recent_files:
+            if Path(f).exists():
+                existing_files.append(f)
+        
+        # Update settings if we removed any
+        if len(existing_files) != len(self.settings.recent_files):
+            self.settings.recent_files = existing_files
+            self.save()
+        
+        return existing_files
+
     
     def get_theme_stylesheet(self) -> str:
         """Get Qt stylesheet for current theme"""

@@ -2,7 +2,7 @@
 from PyQt5.QtWidgets import QGraphicsPathItem, QStyle, QGraphicsDropShadowEffect
 from PyQt5.QtGui import QPainterPath, QPen, QColor, QPainter
 from PyQt5.QtCore import Qt,QPointF
-from model.wire import Wire
+from model.models import Wire
 from model.topology import WireSegment
 from PyQt5.QtWidgets import QGraphicsPathItem, QStyle
 from PyQt5.QtGui import QPainterPath, QPen, QColor
@@ -183,7 +183,12 @@ class WireItem(QGraphicsPathItem):
         except:
             pass
 
-
+    def set_main_window(self, window):
+            """Set reference to main window"""
+            self.main_window = window
+            if window:
+                window.register_graphics_item(self, 'wires')
+                
 class SegmentedWireItem(QGraphicsPathItem):
     """Visual representation of a wire that goes through topology"""
     
@@ -203,6 +208,7 @@ class SegmentedWireItem(QGraphicsPathItem):
         
         # Visual properties
         self.color_data = model.color
+
         self.color = QColor(*self.color_data.rgb)
         self.normal_pen = QPen(self.color, 1.5)
         self.hover_pen = QPen(QColor(255, 255, 0), 2.5)

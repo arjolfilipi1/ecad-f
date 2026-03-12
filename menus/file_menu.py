@@ -43,6 +43,16 @@ class FileMenu:
         save_as_action.triggered.connect(self.main_window.save_project_as)
         self.menu.addAction(save_as_action)
         
+        self.menu.addSeparator()
+        
+        # Project Properties
+        properties_action = QAction("📋 Project Properties...", self.main_window)
+        properties_action.setShortcut("Ctrl+I")
+        properties_action.triggered.connect(self.main_window.show_project_properties)
+        self.menu.addAction(properties_action)
+        
+        self.menu.addSeparator()
+        
         # PUBLISH
         publish_action = QAction("📤 &Publish to Database...", self.main_window)
         publish_action.setShortcut("Ctrl+P")
@@ -95,15 +105,15 @@ class FileMenu:
             return
         
         for filepath in recent_files:
-            action = self.main_window.recent_menu.addAction(Path(filepath).name)
+            # Create action with file name
+            path = Path(filepath)
+            action = self.main_window.recent_menu.addAction(f"{path.name} ({path.parent.name})")
             action.setData(filepath)
+            action.setToolTip(str(filepath))
             action.triggered.connect(lambda checked, f=filepath: self.open_recent(f))
     
     def open_recent(self, filepath):
         """Open a recent file"""
         from controllers.project_controller import ProjectController
-        
-        if Path(filepath).exists():
-            ProjectController.open_project(self.main_window, filepath)
-        else:
-            QMessageBox.warning(self.main_window, "File Not Found", f"File not found:\n{filepath}")
+        ProjectController.open_recent(self.main_window, filepath)
+

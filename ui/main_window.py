@@ -65,8 +65,7 @@ class MainWindow(QMainWindow):
         self.topology_manager = TopologyManager(self)
         self.update_dispatcher = UpdateDispatcher()
         self.viz_manager = VisualizationManager(self)
-        self.project_handler = ProjectFileHandler()
-        
+        self.project_handler = ProjectFileHandler(self)
         # Connect signals
         self.update_dispatcher.connector_moved.connect(self.on_connector_moved)
         self.update_dispatcher.connector_rotated.connect(self.on_connector_moved)
@@ -747,11 +746,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Launch Failed", f"Failed to launch connector manager:\n{str(e)}")
     
     def log_to_console(self):
-        from dialogs.debug import AttributeViewerDialog
-        dialog = AttributeViewerDialog(self.wiringharness)
-        dialog.exec_()
+        # from dialogs.debug import AttributeViewerDialog
+        # dialog = AttributeViewerDialog(self.wiringharness)
+        # dialog.exec_()
 
-        # print(self.wiringharness)
+        print(self.wiringharness.to_dict())
         
     def show_settings(self):
         """Show settings dialog"""
@@ -792,104 +791,79 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.No:
                 return
         
+        from dialogs.project_properties_dialog import ProjectPropertiesDialog
+        
+        # Create new project
         name, ok = QInputDialog.getText(self, "New Project", "Project Name:")
         if ok and name:
             self.clear_scene()
             self.project_handler.new_project(name)
-            self.setWindowTitle(f"ECAD - {name}")
-            self.statusBar().showMessage(f"Created new project: {name}", 3000)
+            
+            # Show properties dialog to set additional info
+            dialog = ProjectPropertiesDialog(self.project_handler.current_project, self)
+            dialog.exec_()  # User can set more properties
+            
+            self.setWindowTitle(f"ECAD - {self.project_handler.current_project.name}")
+            self.statusBar().showMessage(f"Created new project: {self.project_handler.current_project.name}", 3000)
+
     
     
     def save_project(self):
         """Save current project"""
-        if self.project_handler.current_path:
-            # Update models before saving
-            self._update_models_before_save()
-            
-            success = self.project_handler.save_project(
-                filepath=self.project_handler.current_path,
-                main_window=self
-            )
-            if success:
-                self.undo_manager.set_clean()
-                self.statusBar().showMessage(f"Saved: {self.project_handler.current_path}", 3000)
-            else:
-                QMessageBox.critical(self, "Error", "Failed to save project")
-        else:
-            self.save_project_as()
+        from controllers.project_controller import ProjectController
+        ProjectController.save_project(self)
+
 
     def save_project_as(self):
         """Save project with new name"""
-        filepath, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Project As",
-            str(self.settings_manager.settings.default_path +  "/untitled.ecad"),
-            "ECAD Projects (*.ecad);;All Files (*)"
-        )
-        
-        if filepath:
-            if not filepath.endswith('.ecad'):
-                filepath += '.ecad'
-            
-            # Update models before saving
-            self._update_models_before_save()
-            
-            success = self.project_handler.save_project(
-                filepath=filepath,
-                main_window=self
-            )
-            if success:
-                self.undo_manager.set_clean()
-                self.setWindowTitle(f"ECAD - {self.project_handler.current_project.name} ({Path(filepath).name})")
-                
-                self.settings_manager.add_recent_file(filepath)
-                # self._update_recent_menu()
-                
-                self.statusBar().showMessage(f"Saved: {filepath}", 3000)
-            else:
-                QMessageBox.critical(self, "Error", "Failed to save project")
+        from controllers.project_controller import ProjectController
+        ProjectController.save_project_as(self)
+
+    def _update_recent_menu(self):
+        """Update recent files menu (called from FileMenu)"""
+        # This is handled by FileMenu, but we keep this method for compatibility
+        pass
 
     def open_project(self, filepath=None):
         """Open an existing project"""
-        if filepath is None:
-            filepath, _ = QFileDialog.getOpenFileName(
-                self,
-                "Open Project",
-                str(self.settings_manager.settings.default_path),
-                "ECAD Projects (*.ecad);;All Files (*)"
-            )
+        from controllers.project_controller import ProjectController
+        ProjectController.open_project(self, filepath)
+    
+    def open_recent(self, filepath):
+        """Open a recent file"""
+        from controllers.project_controller import ProjectController
+        ProjectController.open_recent(self, filepath)
+
+    def show_project_properties(self):
+        """Show the project properties dialog"""
+
         
-        if filepath:
-            print(f"Opening project: {filepath}")
+        from dialogs.project_properties_dialog import ProjectPropertiesDialog
+        
+        dialog = ProjectPropertiesDialog(self.project_handler.current_project, self)
+        
+        # Store original name for undo
+        old_name = self.project_handler.current_project.name
+        old_part_number = self.project_handler.current_project.part_number
+        old_revision = self.project_handler.current_project.revision
+        old_description = getattr(self.project_handler.current_project, 'description', '')
+        
+        if dialog.exec_():
+            # Update window title if name changed
+            if self.project_handler.current_project.name != old_name:
+                self.setWindowTitle(f"ECAD - {self.project_handler.current_project.name}")
             
-            # Check for unsaved changes
-            if self.project_handler.modified:
-                reply = QMessageBox.question(
-                    self,
-                    "Unsaved Changes",
-                    "Current project has unsaved changes. Open anyway?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if reply == QMessageBox.No:
-                    return
+            # Mark as modified
+            self.project_handler.modified = True
             
-            self.clear_scene()
+            # Update any displays that show project name
+            self.statusBar().showMessage(
+                f"Project properties updated: {self.project_handler.current_project.name}", 
+                3000
+            )
             
-            # Open project
-            project = self.project_handler.open_project(filepath)
-            
-            if project:
-                # Recreate scene from loaded data
-                self._recreate_scene_from_models()
-                
-                self.setWindowTitle(f"ECAD - {project.name} ({Path(filepath).name})")
-                
-                self.settings_manager.add_recent_file(filepath)
-                # self._update_recent_menu()
-                
-                self.statusBar().showMessage(f"Loaded: {filepath}", 3000)
-            else:
-                QMessageBox.critical(self, "Error", "Failed to load project")
+            # Refresh relevant views
+            self.refresh_tree_views()
 
     def _update_models_before_save(self):
         """Update all model data from graphics items before saving"""
@@ -930,10 +904,7 @@ class MainWindow(QMainWindow):
         
         # Clear existing scene
         self.scene.clear()
-        self.conns = []
-        self.bundles = []
-        self.imported_wire_items = []
-        self.routed_wire_items = []
+
         
         # Recreate connectors
         for conn_model in self.wiringharness.connectors.values():

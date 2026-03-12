@@ -76,16 +76,24 @@ class GermanWireColors:
 # Example of combined colors (base + stripe)
 class CombinedWireColor:
     """Represents a wire with base color and stripe"""
-    def __init__(self, base_color: str, stripe_color: Optional[str] = None):
-        base_color = 'SW' if not base_color else base_color
-        self.base_color = base_color.upper()
-        self.stripe_color = stripe_color.upper() if stripe_color else None
-        
+    def __init__(self, base_color: Optional[str] = None, stripe_color: Optional[str] = None,color: Optional[str] = None):
+        if color is None:
+            base_color = 'SW' if not base_color else base_color
+            self.base_color = base_color.upper()
+            self.stripe_color = stripe_color.upper() if stripe_color else None
+        else:
+            if "/" not in color:
+                self.base_color = color
+            else:
+                self.base_color,self.stripe_color = color.split("/")
         if not GermanWireColors.is_valid_color(self.base_color):
             raise ValueError(f"Invalid base color code: {base_color}")
         
         if self.stripe_color and not GermanWireColors.is_valid_color(self.stripe_color):
             raise ValueError(f"Invalid stripe color code: {stripe_color}")
+    
+    def to_dict(self):
+        return { 'color': (self.base_color + "/" +self.stripe_color) if self.stripe_color else self.base_color }
     def upper(self):
         return self.code.upper()
     @property
@@ -220,6 +228,10 @@ class Pin:
     current_rating: Optional[float] = None  # Amps
     graphics_item: Optional[any] = None
     
+    @property
+    def id(self):
+        return self.pid
+        
     def is_used(self) -> bool:
         return len(self.wire_ids) > 0
         
@@ -243,10 +255,11 @@ class Pin:
         print("removed wire",self.wire_ids,wire.id)
     def to_dict(self) -> dict:
         return {
+            'pid': self.pid,
             'number': self.number,
             'gender': self.gender.value,
             'seal': self.seal.value,
-            'wire_id': self.wire_id,
+            'wire_ids': self.wire_ids,
             'description': self.description,
             'current_rating': self.current_rating
         }
@@ -254,10 +267,11 @@ class Pin:
     @classmethod
     def from_dict(cls, data: dict) -> 'Pin':
         return cls(
+            pid=data['pid'],
             number=data['number'],
             gender=Gender(data['gender']),
             seal=SealType(data['seal']),
-            wire_id=data.get('wire_id'),
+            wire_ids=data.get('wire_ids'),
             description=data.get('description'),
             current_rating=data.get('current_rating')
         )
@@ -339,7 +353,7 @@ class Connector:
     
     @property
     def wire_count(self) -> int:
-        return sum(1 for pin in self.pins.values() if pin.wire_id)
+        return sum(1 for pin in self.pins.values() if pin.wire_ids)
     
     @property
     def pin_count(self) -> int:
@@ -379,6 +393,7 @@ class Connector:
             description=data.get('description')
         )
         for pin_num, pin_data in data.get('pins', {}).items():
+            print(pin_data)
             connector.pins[pin_num] = Pin.from_dict(pin_data)
         return connector
 
@@ -578,6 +593,7 @@ class WiringHarness:
     name: str = "New Harness"
     part_number: str = ""
     revision: str = "1.0"
+    description: str = ""  # ADD THIS
     created_date: datetime = field(default_factory=datetime.now)
     modified_date: datetime = field(default_factory=datetime.now)
     branch_points: Dict[str, BranchPoint] = field(default_factory=dict)  # ADD THIS
@@ -643,13 +659,13 @@ class WiringHarness:
             'name': self.name,
             'part_number': self.part_number,
             'revision': self.revision,
+            'description': self.description,  
             'created_date': self.created_date.isoformat(),
             'modified_date': self.modified_date.isoformat(),
-            'branch_points': {k: v.to_dict() for k, v in self.branch_points.items()},  # ADD THIS
-            # 'connectors': {k: v.to_dict() for k, v in self.connectors.items()},
-            'connectors': {k: v for k, v in self.connectors},
+            'branch_points': {k: v.to_dict() for k, v in self.branch_points.items()},  
+            'connectors': {k: v.to_dict() for k, v in self.connectors.items()},
             'wires': {k: v.to_dict() for k, v in self.wires.items()},
-            'bundles': {k: v.to_dict() for k, v in self.bundles.items()},  # ADD THIS
+            'bundles': {k: v.to_dict() for k, v in self.bundles.items()}, 
             'branches': {k: v.to_dict() for k, v in self.branches.items()},
             'protections': {k: v.to_dict() for k, v in self.protections.items()},
             'nodes': {k: v.to_dict() for k, v in self.nodes.items()}
@@ -662,6 +678,7 @@ class WiringHarness:
             name=data.get('name', 'New Harness'),
             part_number=data.get('part_number', ''),
             revision=data.get('revision', '1.0'),
+            description=data.get('description', ''),
             created_date=datetime.fromisoformat(data['created_date']) if 'created_date' in data else datetime.now(),
             modified_date=datetime.fromisoformat(data['modified_date']) if 'modified_date' in data else datetime.now()
         )

@@ -116,16 +116,16 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
             self.table.setItem(row, 0, pin_item)
             
             # Wire ID
-            if pin.wire_ids:
-                wire = pin.wire_ids[0]
-                wire_id = wire.wid if hasattr(wire, 'wid') else str(wire)
+            if pin.graphics_item.wire_items:
+                wire = pin.graphics_item.wire_items[0]
+                wire_id = wire.model.id if hasattr(wire.model, 'id') else str(wire)
                 
                 wire_item = QTableWidgetItem(wire_id)
                 max_wire_length = max(max_wire_length, len(wire_id))
                 
                 # Color the cell based on wire color
-                if hasattr(wire, 'color_data'):
-                    color = QColor(*wire.color_data.rgb)
+                if hasattr(wire.model, 'color'):
+                    color = QColor(*wire.model.color.rgb)
                     # Lighten the color for background
                     color.setAlpha(100)
                     wire_item.setBackground(QBrush(color))
@@ -139,17 +139,32 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
             
             self.table.setItem(row, 1, wire_item)
             
+                # wire = pin.wire_items[0]
+                # wire_text = f"{wire.wid} ({wire.color_data.code})"
+                # wire_item = QTableWidgetItem(wire_text)
+                # max_wire_length = max(max_wire_length, len(wire_text))
+                
+
+                # color = QColor(*wire.color_data.rgb)
+                # color.setAlpha(100)
+                # wire_item.setBackground(QBrush(color))
+                
+
+                # if wire.color_data.rgb[0] + wire.color_data.rgb[1] + wire.color_data.rgb[2] < 384:
+                    # wire_item.setForeground(QBrush(Qt.white))
+            
             # Color
-            if pin.wire_ids and hasattr(pin.wire_ids[0], 'color_data'):
-                color_code = pin.wire_id[0].color_data.code
+            if pin.graphics_item.wire_items and hasattr(pin.graphics_item.wire_items[0].model, 'color'):
+                wire = pin.graphics_item.wire_items[0]
+                color_code = wire.model.color.code
                 color_item = QTableWidgetItem(color_code)
                 
                 # Show actual color in background
-                color = QColor(*pin.wire_id[0].color_data.rgb)
+                color = QColor(*wire.color_data.rgb)
                 color_item.setBackground(QBrush(color))
                 
                 # Set text color for contrast
-                if pin.wire_id[0].color_data.rgb[0] + pin.wire_id[0].color_data.rgb[1] + pin.wire_id[0].color_data.rgb[2] < 384:
+                if wire.color_data.rgb[0] + wire.color_data.rgb[1] + wire.color_data.rgb[2] < 384:
                     color_item.setForeground(QBrush(Qt.white))
             else:
                 color_item = QTableWidgetItem("—")
@@ -246,8 +261,8 @@ class CompactConnectorInfoTable(ConnectorInfoTable):
             self.table.setItem(row, 0, pin_item)
             
             # Wire info (combined)
-            if pin.wires:
-                wire = pin.wires[0]
+            if pin.wire_items:
+                wire = pin.wire_items[0]
                 wire_text = f"{wire.wid} ({wire.color_data.code})"
                 wire_item = QTableWidgetItem(wire_text)
                 max_wire_length = max(max_wire_length, len(wire_text))

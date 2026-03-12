@@ -55,7 +55,7 @@ class PinItem(QGraphicsEllipseItem):
     @property
     def pid(self) -> str:
         """Get pin identifier"""
-        return f"{self.parent.cid}_{self.model.number}"
+        return f"{self.parent.model.id}_{self.model.number}"
 
     @property
     def original_id(self) -> str:

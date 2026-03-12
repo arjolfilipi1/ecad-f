@@ -1,18 +1,152 @@
 {
-  "id": "7699e212-3930-483a-9801-5296db84602f",
-  "name": "12123",
+  "id": "28948ee2-e0e2-4484-ad4f-fc92c2a5d6fc",
+  "name": "New Harness",
   "part_number": "",
   "revision": "1.0",
-  "created_date": "2026-03-11T23:52:31.455071",
-  "modified_date": "2026-03-11T23:52:31.455071",
+  "description": "",
+  "created_date": "2026-03-12T10:25:16.532392",
+  "modified_date": "2026-03-12T14:41:04.679365",
   "branch_points": {},
-  "connectors": {},
-  "wires": {},
-  "bundles": {},
+  "connectors": {
+    "C0": {
+      "id": "C0",
+      "name": "C0",
+      "type": "Other",
+      "gender": "Female",
+      "seal": "Unsealed",
+      "part_number": null,
+      "manufacturer": null,
+      "pins": {
+        "1": {
+          "pid": "C0_1",
+          "number": 1,
+          "gender": "Female",
+          "seal": "Unsealed",
+          "wire_ids": [
+            "W1",
+            "W1"
+          ],
+          "description": null,
+          "current_rating": null
+        },
+        "2": {
+          "pid": "C0_2",
+          "number": 2,
+          "gender": "Female",
+          "seal": "Unsealed",
+          "wire_ids": null,
+          "description": null,
+          "current_rating": null
+        }
+      },
+      "position": [
+        34.0,
+        -174.0
+      ],
+      "description": null
+    },
+    "C1": {
+      "id": "C1",
+      "name": "C1",
+      "type": "Other",
+      "gender": "Female",
+      "seal": "Unsealed",
+      "part_number": null,
+      "manufacturer": null,
+      "pins": {
+        "1": {
+          "pid": "C1_1",
+          "number": 1,
+          "gender": "Female",
+          "seal": "Unsealed",
+          "wire_ids": [
+            "W1",
+            "W1"
+          ],
+          "description": null,
+          "current_rating": null
+        },
+        "2": {
+          "pid": "C1_2",
+          "number": 2,
+          "gender": "Female",
+          "seal": "Unsealed",
+          "wire_ids": null,
+          "description": null,
+          "current_rating": null
+        }
+      },
+      "position": [
+        -66.0,
+        45.0
+      ],
+      "description": null
+    }
+  },
+  "wires": {
+    "W1": {
+      "id": "W1",
+      "harness_id": "28948ee2-e0e2-4484-ad4f-fc92c2a5d6fc",
+      "type": "FLRY-B 0.5 mm²",
+      "color": {
+        "color": "SW/WS"
+      },
+      "from_node_id": "C0",
+      "to_node_id": "C1",
+      "from_pin": 1,
+      "to_pin": 1,
+      "calculated_length_mm": null,
+      "signal_name": "Signal_W1",
+      "part_number": null,
+      "notes": null,
+      "cross_section": 0.5,
+      "length": 0.0
+    }
+  },
+  "bundles": {
+    "B0": {
+      "id": "B0",
+      "name": "B0",
+      "start_point": [
+        -66.0,
+        45.0
+      ],
+      "end_point": [
+        -168.74999999999997,
+        -164.99999999999997
+      ],
+      "start_node_id": "C1",
+      "end_node_id": "BP_b0f33c4c",
+      "specified_length": 1.0,
+      "length": 233.7895688434366,
+      "wire_count": 0,
+      "wire_ids": [],
+      "auto_created": false
+    },
+    "B1": {
+      "id": "B1",
+      "name": "B1",
+      "start_point": [
+        -168.74999999999997,
+        -164.99999999999997
+      ],
+      "end_point": [
+        34.0,
+        -174.0
+      ],
+      "start_node_id": null,
+      "end_node_id": "C0",
+      "specified_length": 2.0,
+      "length": 202.94965508716683,
+      "wire_count": 0,
+      "wire_ids": [],
+      "auto_created": false
+    }
+  },
   "branches": {},
   "protections": {},
   "nodes": {},
   "file_version": "1.0",
-  "saved_date": "2026-03-11T23:52:46.195919",
+  "saved_date": "2026-03-12T14:41:10.464389",
   "ecad_version": "1.0"
 }

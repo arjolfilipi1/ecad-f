@@ -1,7 +1,11 @@
 from typing import List, Dict, Optional, Tuple
 from PyQt5.QtCore import QPointF
 import math
+from collections import deque
+
 from graphics.visualization_manager import VisualizationMode
+from graphics.wire_item import SegmentedWireItem
+from model.models import Wire, CombinedWireColor
 
 
 class BundleRouter:
@@ -60,14 +64,15 @@ class BundleRouter:
                 self.main_window.routed_wire_items = []
             self.main_window.routed_wire_items.extend(routed_wires)
             
-            # Update wires list
-            self.main_window.wires = [item.wire for item in routed_wires if hasattr(item, 'wire')]
+            # Update wires list (using model IDs)
+            self.main_window.wires = [item.model for item in routed_wires if hasattr(item, 'model')]
             
             # Create segments if they don't exist
             self._create_missing_segments(bundles, created_segments)
             
             # Refresh views
             self.main_window.refresh_tree_views()
+            self.main_window.refresh_bundle_tree()
             
             # Update visualization
             if hasattr(self.main_window, 'viz_manager'):
@@ -75,14 +80,14 @@ class BundleRouter:
                 self.main_window.viz_manager.show_direct_wires = False
                 self.main_window.viz_manager.update_visibility()
             
-            # Create undo command    main_window, original_wires, routed_wires, branch_points, segments, bundles
+            # Create undo command
             from commands.bundle_commands import RouteWiresThroughBundlesCommand
             cmd = RouteWiresThroughBundlesCommand(
-                main_window = self.main_window,
-                original_wires = wires,
-                routed_wires = routed_wires,
-                created_segments = created_segments,
-                bundles =bundles
+                main_window=self.main_window,
+                original_wires=wires,
+                routed_wires=routed_wires,
+                created_segments=created_segments,
+                bundles=bundles
             )
             self.main_window.undo_manager.push(cmd)
             
@@ -101,33 +106,71 @@ class BundleRouter:
                 # Try to find or create start node
                 if bundle.start_item and hasattr(bundle.start_item, 'topology_node'):
                     bundle.start_node = bundle.start_item.topology_node
+                    bundle.model.start_node_id = bundle.start_node.id
                 else:
                     # Create a new branch point
                     from model.topology import BranchPointNode
                     from graphics.topology_item import BranchPointGraphicsItem
+                    from model.models import BranchPoint
                     
+                    # Create model
+                    bp_id = self.main_window.wiringharness.next_bpid()
+                    bp_model = BranchPoint(
+                        id=bp_id,
+                        name=bp_id,
+                        position=(bundle.start_point.x(), bundle.start_point.y()),
+                        branch_type="junction"
+                    )
+                    self.main_window.wiringharness.add_branch_point(bp_model)
+                    
+                    # Create node
                     node = BranchPointNode((bundle.start_point.x(), bundle.start_point.y()), "junction")
-                    graphics = BranchPointGraphicsItem(node)
+                    node.id = bp_id
+                    
+                    # Create graphics
+                    graphics = BranchPointGraphicsItem(bp_model, self.main_window)
+                    graphics.branch_node = node
                     self.scene.addItem(graphics)
+                    
                     self.topology_manager.nodes[node.id] = node
                     bundle.start_node = node
                     bundle.start_item = graphics
+                    bundle.model.start_node_id = node.id
             
             if not bundle.end_node:
                 # Try to find or create end node
                 if bundle.end_item and hasattr(bundle.end_item, 'topology_node'):
                     bundle.end_node = bundle.end_item.topology_node
+                    bundle.model.end_node_id = bundle.end_node.id
                 else:
                     # Create a new branch point
                     from model.topology import BranchPointNode
                     from graphics.topology_item import BranchPointGraphicsItem
+                    from model.models import BranchPoint
                     
+                    # Create model
+                    bp_id = self.main_window.wiringharness.next_bpid()
+                    bp_model = BranchPoint(
+                        id=bp_id,
+                        name=bp_id,
+                        position=(bundle.end_point.x(), bundle.end_point.y()),
+                        branch_type="junction"
+                    )
+                    self.main_window.wiringharness.add_branch_point(bp_model)
+                    
+                    # Create node
                     node = BranchPointNode((bundle.end_point.x(), bundle.end_point.y()), "junction")
-                    graphics = BranchPointGraphicsItem(node)
+                    node.id = bp_id
+                    
+                    # Create graphics
+                    graphics = BranchPointGraphicsItem(bp_model, self.main_window)
+                    graphics.branch_node = node
                     self.scene.addItem(graphics)
+                    
                     self.topology_manager.nodes[node.id] = node
                     bundle.end_node = node
                     bundle.end_item = graphics
+                    bundle.model.end_node_id = node.id
     
     def _build_bundle_graph(self, bundles):
         """
@@ -163,8 +206,6 @@ class BundleRouter:
             return [start_node]
         
         # BFS to find path
-        from collections import deque
-        
         visited = {start_node}
         queue = deque([(start_node, [start_node])])
         
@@ -229,13 +270,14 @@ class BundleRouter:
                     
                     # Find which bundles are used in this path
                     used_bundles = self._find_bundles_in_path(path_nodes, bundles)
-                    print("used",path_nodes,used_bundles,bundles)
+                    
                     # Create the routed wire and assign to bundles
                     return self._create_routed_wire(wire, full_path, used_bundles, 
                                                     created_segments, routed_wires)
         
         print(f"Wire {wire.wid}: No bundle path found")
         return False
+    
     def _find_bundles_in_path(self, path_nodes, bundles) -> List:
         """
         Find which bundles are used in the node path
@@ -248,7 +290,6 @@ class BundleRouter:
             node2 = path_nodes[i + 1]
             
             # Find bundle connecting these two nodes
-            # add check if conn is start and nodes match
             for bundle in bundles:
                 if (bundle.start_node == node1 and bundle.end_node == node2) or \
                    (bundle.start_node == node2 and bundle.end_node == node1):
@@ -257,13 +298,37 @@ class BundleRouter:
                     break
         
         return used_bundles
-
     
     def _create_routed_wire(self, original_wire, node_path, used_bundles, 
                            created_segments, routed_wires):
         """Create a routed wire along the given node path and assign to bundles"""
         from graphics.wire_item import SegmentedWireItem
-        from model.wire import Wire
+        
+        # Create wire model
+        wire_id = f"ROUTE_{original_wire.wid}"
+        
+        # Get color data from original wire
+        if hasattr(original_wire, 'color_data'):
+            color_data = original_wire.color_data
+        else:
+            color_data = CombinedWireColor('SW')
+        
+        # Create wire model
+        wire_model = Wire(
+            id=wire_id,
+            harness_id=self.main_window.wiringharness.id,
+            type=original_wire.model.type if hasattr(original_wire, 'model') else None,
+            color=color_data,
+            from_node_id=original_wire.start_pin.parent.model.id,
+            to_node_id=original_wire.end_pin.parent.model.id,
+            from_pin=original_wire.start_pin.original_id,
+            to_pin=original_wire.end_pin.original_id,
+            cross_section=getattr(original_wire, 'cross_section', 0.5),
+            signal_name=getattr(original_wire, 'signal_name', '')
+        )
+        
+        # Add to harness
+        self.main_window.wiringharness.add_wire(wire_model)
         
         # Find or create segments along the path
         path_segments = []
@@ -293,33 +358,22 @@ class BundleRouter:
             
             path_segments.append(segment)
         
-        # Create wire object
-        wire_id = f"ROUTE_{original_wire.wid}"
-        
-        wire = Wire(
-            wire_id,
-            original_wire.start_pin,
-            original_wire.end_pin,
-            original_wire.color_data.code if hasattr(original_wire, 'color_data') else 'SW'
-        )
-        wire.cross_section = getattr(original_wire, 'cross_section', 0.5)
-        wire.color_data = original_wire.color_data
-        
         # Add wire to segments
         for segment in path_segments:
-            wire.add_segment(segment)
-            if wire not in segment.wires:
-                segment.wires.append(wire)
+            if wire_model not in segment.wires:
+                segment.wires.append(wire_model)
         
         # Create graphics
-        wire_graphics = SegmentedWireItem(wire)
+        wire_graphics = SegmentedWireItem(wire_model)
         wire_graphics.set_main_window(self.main_window)
+        wire_graphics.connect_to_pins(original_wire.start_pin, original_wire.end_pin)
         self.scene.addItem(wire_graphics)
-        wire.graphics_item = wire_graphics
+        wire_graphics.model = wire_model
+        wire_model.graphics_item = wire_graphics
         
         routed_wires.append(wire_graphics)
         
-        # ASSIGN WIRE TO BUNDLES - THIS IS THE KEY PART
+        # ASSIGN WIRE TO BUNDLES
         for bundle in used_bundles:
             bundle.assign_wire(original_wire.wid)
             print(f"Assigned wire {original_wire.wid} to bundle {bundle.bundle_id}")
@@ -338,7 +392,6 @@ class BundleRouter:
                 segment.graphics_item.update_appearance()
         
         return True
-
     
     def _find_segment_between_nodes(self, node1, node2):
         """Find existing segment between two nodes"""
@@ -374,4 +427,5 @@ class BundleRouter:
                         
                         bundle.segment = segment
                         bundle.segment_graphics = segment_graphics
+
 

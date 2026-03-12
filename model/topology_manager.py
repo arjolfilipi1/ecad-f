@@ -1,7 +1,7 @@
 #model/topology_manager
 from typing import List, Dict, Optional, Set
 from model.topology import TopologyNode, JunctionNode, BranchPointNode, WireSegment, Bundle
-from model.wire import Wire
+from model.models import Wire
 from graphics.pin_item import PinItem
 from graphics.connection_point import ConnectionPoint
 from PyQt5.QtCore import QPointF
@@ -183,7 +183,6 @@ class TopologyManager:
         wire_id = f"W{len(self.wires) + 1}"
         
         # Import here to avoid circular imports
-        from model.wire import Wire
         if not import_wire:
             wire = Wire(wire_id, from_pin, to_pin,wid)
         else:
