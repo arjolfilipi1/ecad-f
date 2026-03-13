@@ -9,7 +9,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
     def __init__(self, connector):
         super().__init__(connector)
         self.connector = connector
-        self.setFlag(self.ItemIgnoresTransformations, False)
+        self.setFlag(self.ItemIgnoresTransformations, True)
         self.setZValue(10)
         
         # Create the table widget

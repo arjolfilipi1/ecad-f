@@ -9,6 +9,7 @@ from PyQt5.QtGui import QPainterPath, QPen, QColor
 from PyQt5.QtCore import Qt, QPointF
 from model.models import CombinedWireColor
 from PyQt5 import sip
+from typing import List
 
 class WireItem(QGraphicsPathItem):
     def __init__(self, model: Wire):
@@ -190,25 +191,39 @@ class WireItem(QGraphicsPathItem):
                 window.register_graphics_item(self, 'wires')
                 
 class SegmentedWireItem(QGraphicsPathItem):
-    """Visual representation of a wire that goes through topology"""
+    """Visual representation of a wire routed through bundles"""
     
-    def __init__(self, model: Wire):
+    def __init__(self, wire_model: Wire, path_segments: List, main_window=None):
         """
-        Create a segmented wire graphics item from a Wire model.
+        Create a segmented wire graphics item from a Wire model and path segments.
         
         Args:
-            model: The Wire model object
+            wire_model: The Wire model object (from model.models)
+            path_segments: List of topology segments that form the path
+            main_window: Reference to main window
         """
         super().__init__()
-        self.model = model
-        self.setFlag(self.ItemIsSelectable)
-        self.main_window = None
+        self.wire_model = wire_model  # Reference to the actual wire model
+        self.model = wire_model  # Reference to the actual wire model for properties 
+        self.setFlag(self.ItemIsSelectable, True)
+        self.main_window = main_window
         self.node_type = "Wire segment"
         self.tree_item = None
+        self.original_wire = None  # Reference to original wire graphics if this is a routed version
+        self.used_bundles = []  # Bundles this wire passes through
+        self.path_segments = path_segments  # Store segments for path calculation
         
-        # Visual properties
-        self.color_data = model.color
-
+        # Add this graphics item to the wire model's routed_graphics list
+        if wire_model:
+            wire_model.add_routed_graphics(self)
+        
+        # Connection points (set when connecting to pins)
+        self.start_pin = None
+        self.end_pin = None
+        self.is_connected = False
+        
+        # Visual properties - use the wire model's color
+        self.color_data = wire_model.color
         self.color = QColor(*self.color_data.rgb)
         self.normal_pen = QPen(self.color, 1.5)
         self.hover_pen = QPen(QColor(255, 255, 0), 2.5)
@@ -218,61 +233,53 @@ class SegmentedWireItem(QGraphicsPathItem):
         self.setZValue(4)
         
         self._is_hovered = False
-        self.used_bundles = []  # Bundles this wire passes through
         
         # Path will be updated when segments are available
         self.update_path()
     
     @property
     def wid(self) -> str:
-        """Get wire ID from model"""
-        return self.model.id
+        """Get wire ID from the wire model"""
+        return self.wire_model.id
     
-    def contextMenuEvent(self, event):
-        """Handle right-click context menu"""
-        from graphics.context_menus import WireContextMenu
-        self.setSelected(True)
-        menu = WireContextMenu(self, self.main_window)
-        menu.exec_(event.screenPos())
-    
-    def set_main_window(self, window):
-        """Set reference to main window"""
-        self.main_window = window
-        if window:
-            window.register_graphics_item(self, 'wires')
+    def connect_to_pins(self, start_pin, end_pin):
+        """Connect this wire to actual pin graphics items"""
+        self.start_pin = start_pin
+        self.end_pin = end_pin
+        self.is_connected = True
+        
+        # Add this wire to the pins' wire lists
+        if start_pin and self not in start_pin.wire_items:
+            start_pin.wire_items.append(self)
+        if end_pin and self not in end_pin.wire_items:
+            end_pin.wire_items.append(self)
+        
+        self.update_path()
     
     def update_path(self):
         """Draw the complete path of the wire through segments"""
-        if not hasattr(self.model, 'segments') or not self.model.segments:
-            # Fallback to direct connection if pins are available
-            self._draw_direct_path()
-            return
-        
         path = QPainterPath()
-        first_point = True
         
-        # Get from pin position if available
-        if self.model.from_pin and hasattr(self.model.from_pin, 'scene_position'):
-            start_pos = self.model.from_pin.scene_position()
+        # Build node path from segments
+        node_positions = []
+        
+        # Start from the start pin if available
+        if self.start_pin and self.is_connected:
+            start_pos = self.start_pin.scene_position()
             path.moveTo(start_pos)
-            first_point = False
+            node_positions.append(start_pos)
         
-        # Add all segment paths
-        for segment in self.model.segments:
-            if segment.start_node and segment.end_node:
-                p1 = QPointF(*segment.start_node.position)
-                p2 = QPointF(*segment.end_node.position)
-                
-                if first_point:
-                    path.moveTo(p1)
-                    first_point = False
-                
-                path.lineTo(p2)
+        # Add all segment end nodes
+        for segment in self.path_segments:
+            if segment.end_node:
+                end_pos = QPointF(*segment.end_node.position)
+                path.lineTo(end_pos)
+                node_positions.append(end_pos)
         
         # Connect to end pin if available
-        if self.model.to_pin and hasattr(self.model.to_pin, 'scene_position'):
-            end_pos = self.model.to_pin.scene_position()
-            if not first_point:
+        if self.end_pin and self.is_connected:
+            end_pos = self.end_pin.scene_position()
+            if node_positions and node_positions[-1] != end_pos:
                 path.lineTo(end_pos)
         
         self.setPath(path)
@@ -281,35 +288,6 @@ class SegmentedWireItem(QGraphicsPathItem):
         self.color = QColor(*self.color_data.rgb)
         self.normal_pen.setColor(self.color)
         self.update_appearance()
-    
-    def _draw_direct_path(self):
-        """Fallback: draw direct Manhattan path between pins"""
-        if (not self.model.from_pin or not self.model.to_pin or
-            not hasattr(self.model.from_pin, 'scene_position') or
-            not hasattr(self.model.to_pin, 'scene_position')):
-            return
-        
-        p1 = self.model.from_pin.scene_position()
-        p2 = self.model.to_pin.scene_position()
-        
-        path = QPainterPath(p1)
-        
-        # Manhattan routing
-        dx = p2.x() - p1.x()
-        dy = p2.y() - p1.y()
-        
-        if abs(dx) > abs(dy):
-            mid_x = p1.x() + dx * 0.5
-            path.lineTo(mid_x, p1.y())
-            path.lineTo(mid_x, p2.y())
-            path.lineTo(p2)
-        else:
-            mid_y = p1.y() + dy * 0.5
-            path.lineTo(p1.x(), mid_y)
-            path.lineTo(p2.x(), mid_y)
-            path.lineTo(p2)
-        
-        self.setPath(path)
     
     def update_appearance(self):
         """Update pen based on selection/hover state"""
@@ -343,10 +321,22 @@ class SegmentedWireItem(QGraphicsPathItem):
         self.update()
         super().hoverLeaveEvent(event)
     
+    def set_main_window(self, window):
+        """Set reference to main window"""
+        self.main_window = window
+    
     def cleanup(self):
         """Clean up wire references"""
-        if self.main_window:
-            self.main_window.unregister_graphics_item(self, 'wires')
+        # Remove from wire model's routed_graphics list
+        if self.wire_model:
+            self.wire_model.remove_routed_graphics(self)
+        
+        # Remove from pins' wire_items lists
+        if self.start_pin and self in self.start_pin.wire_items:
+            self.start_pin.wire_items.remove(self)
+        if self.end_pin and self in self.end_pin.wire_items:
+            self.end_pin.wire_items.remove(self)
+        
         if self.tree_item:
             try:
                 tree = self.tree_item.treeWidget()
@@ -357,6 +347,7 @@ class SegmentedWireItem(QGraphicsPathItem):
             except RuntimeError:
                 pass
             self.tree_item = None
+
     
     def __del__(self):
         try:

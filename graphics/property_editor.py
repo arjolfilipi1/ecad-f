@@ -7,6 +7,7 @@ from PyQt5.QtGui import QColor,QPainter
 from model.models import Connector, Wire, Pin, CombinedWireColor
 from model.models import ConnectorType, Gender, SealType, WireType
 from PyQt5 import sip
+
 class PropertyEditor(QWidget):
     """Dynamic property editor that adapts to selected item type"""
     
@@ -322,6 +323,14 @@ class PropertyEditor(QWidget):
         
         self.content_layout.addWidget(conn_group)
         
+        # route info
+        route_group = QGroupBox("Route")
+        route_layout = QFormLayout(route_group)
+        
+        # From
+        r_label = QLabel(f"{wire_item.model.route}")
+        route_layout.addRow("From:", r_label)
+        self.content_layout.addWidget(route_group)
         # Length info
         length_group = QGroupBox("Length")
         length_layout = QFormLayout(length_group)

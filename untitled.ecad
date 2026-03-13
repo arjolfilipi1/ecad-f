@@ -1,11 +1,11 @@
 {
-  "id": "28948ee2-e0e2-4484-ad4f-fc92c2a5d6fc",
+  "id": "dcd86b21-924e-4b6d-afeb-7cc1ec53d6b7",
   "name": "New Harness",
-  "part_number": "",
+  "part_number": null,
   "revision": "1.0",
-  "description": "",
-  "created_date": "2026-03-12T10:25:16.532392",
-  "modified_date": "2026-03-12T14:41:04.679365",
+  "description": null,
+  "created_date": "2026-03-13T09:06:14.094894",
+  "modified_date": "2026-03-13T11:12:50.116311",
   "branch_points": {},
   "connectors": {
     "C0": {
@@ -23,7 +23,6 @@
           "gender": "Female",
           "seal": "Unsealed",
           "wire_ids": [
-            "W1",
             "W1"
           ],
           "description": null,
@@ -40,8 +39,8 @@
         }
       },
       "position": [
-        34.0,
-        -174.0
+        -29.0,
+        -133.0
       ],
       "description": null
     },
@@ -60,7 +59,6 @@
           "gender": "Female",
           "seal": "Unsealed",
           "wire_ids": [
-            "W1",
             "W1"
           ],
           "description": null,
@@ -77,8 +75,8 @@
         }
       },
       "position": [
-        -66.0,
-        45.0
+        -94.0,
+        56.0
       ],
       "description": null
     }
@@ -86,10 +84,10 @@
   "wires": {
     "W1": {
       "id": "W1",
-      "harness_id": "28948ee2-e0e2-4484-ad4f-fc92c2a5d6fc",
+      "harness_id": "dcd86b21-924e-4b6d-afeb-7cc1ec53d6b7",
       "type": "FLRY-B 0.5 mm²",
       "color": {
-        "color": "SW/WS"
+        "color": "SW"
       },
       "from_node_id": "C0",
       "to_node_id": "C1",
@@ -100,53 +98,52 @@
       "part_number": null,
       "notes": null,
       "cross_section": 0.5,
-      "length": 0.0
+      "route": [
+        "C0",
+        "C1",
+        "C0",
+        "C1"
+      ]
     }
   },
   "bundles": {
-    "B0": {
-      "id": "B0",
-      "name": "B0",
+    "B2": {
+      "id": "B2",
+      "name": "B2",
       "start_point": [
-        -66.0,
-        45.0
+        -94.0,
+        56.0
       ],
       "end_point": [
-        -168.74999999999997,
-        -164.99999999999997
+        -29.0,
+        -133.0
       ],
       "start_node_id": "C1",
-      "end_node_id": "BP_b0f33c4c",
-      "specified_length": 1.0,
-      "length": 233.7895688434366,
-      "wire_count": 0,
-      "wire_ids": [],
-      "auto_created": false
-    },
-    "B1": {
-      "id": "B1",
-      "name": "B1",
-      "start_point": [
-        -168.74999999999997,
-        -164.99999999999997
-      ],
-      "end_point": [
-        34.0,
-        -174.0
-      ],
-      "start_node_id": null,
       "end_node_id": "C0",
       "specified_length": 2.0,
-      "length": 202.94965508716683,
-      "wire_count": 0,
-      "wire_ids": [],
+      "length": 199.86495440671933,
+      "wire_count": 1,
+      "wire_ids": [
+        "W1"
+      ],
       "auto_created": false
+    }
+  },
+  "segments": {
+    "SEG_1": {
+      "id": "SEG_1",
+      "start_node_id": "C0",
+      "end_node_id": "C1",
+      "wire_ids": [
+        "W1"
+      ],
+      "bundle_id": "B2"
     }
   },
   "branches": {},
   "protections": {},
   "nodes": {},
   "file_version": "1.0",
-  "saved_date": "2026-03-12T14:41:10.464389",
+  "saved_date": "2026-03-13T14:58:47.381672",
   "ecad_version": "1.0"
 }

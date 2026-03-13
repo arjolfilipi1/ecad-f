@@ -47,7 +47,8 @@ class PinItem(QGraphicsEllipseItem):
 
     def add_wire(self, wire):
         self.model.add_wire_model(wire.model)
-        self.wire_items.append(wire)
+        if wire not in self.wire_items:
+            self.wire_items.append(wire)
     def remove_wire(self, wire):
         self.model.remove_wire_model(wire.model)
         if wire in self.wire_items:

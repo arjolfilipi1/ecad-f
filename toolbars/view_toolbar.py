@@ -24,3 +24,5 @@ class ViewToolbar(QToolBar):
             viz_actions = self.main_window.viz_manager.create_toolbar_actions()
             for action in viz_actions:
                 self.addAction(action)
+        else:
+            print("no viz manager")

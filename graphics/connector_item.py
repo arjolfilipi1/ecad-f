@@ -99,7 +99,7 @@ class ConnectorItem(QGraphicsRectItem):
     def _update_connected_bundles(self):
         """Update all bundles connected to this connector"""
         if not self.topology_node:
-            # "no topology node")
+            # print("no topology node")
             return
         
         # Find all bundles connected to this node
@@ -127,7 +127,7 @@ class ConnectorItem(QGraphicsRectItem):
     def get_pin_by_id(self, pin_id: str) -> Optional[PinItem]:
         """Find pin by its original identifier (e.g., 'A1', '3')"""
         for pin in self.pins:
-            if hasattr(pin, 'model') and pin.model.pid == pin_id:
+            if hasattr(pin, 'model') and pin.model.pid == pin_id or str(pin.model.pid) == pin_id:
                 return pin
         return None
 

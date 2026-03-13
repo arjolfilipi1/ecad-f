@@ -117,7 +117,7 @@ class ProjectController:
         filepath, _ = QFileDialog.getSaveFileName(
             main_window,
             "Save Project As",
-            str(main_window.settings_manager.settings.default_path / "untitled.ecad"),
+            str(main_window.settings_manager.settings.default_path+  "/untitled.ecad"),
             "ECAD Projects (*.ecad);;All Files (*)"
         )
         

@@ -84,6 +84,7 @@ class CombinedWireColor:
         else:
             if "/" not in color:
                 self.base_color = color
+                self.stripe_color = None
             else:
                 self.base_color,self.stripe_color = color.split("/")
         if not GermanWireColors.is_valid_color(self.base_color):
@@ -215,7 +216,34 @@ class Fastener:
     distance_from_start_mm: Optional[float] = None  # Position along branch
     node_id: Optional[str] = None  # If attached to a node
     
+@dataclass
+class TopologySegment:
+    """Represents a segment in the topology graph"""
+    id: str
+    start_node_id: str
+    end_node_id: str
+    wire_ids: List[str] = field(default_factory=list)
+    bundle_id: Optional[str] = None
     
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'start_node_id': self.start_node_id,
+            'end_node_id': self.end_node_id,
+            'wire_ids': self.wire_ids,
+            'bundle_id': self.bundle_id
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'TopologySegment':
+        return cls(
+            id=data['id'],
+            start_node_id=data['start_node_id'],
+            end_node_id=data['end_node_id'],
+            wire_ids=data.get('wire_ids', []),
+            bundle_id=data.get('bundle_id')
+        )
+
 @dataclass
 class Pin:
     """Represents a single cavity/pin within a connector."""
@@ -240,7 +268,8 @@ class Pin:
         if isinstance(wire,Wire):
             if not self.wire_ids:
                 self.wire_ids = []
-            self.wire_ids.append(wire.id)
+            if wire.id not in self.wire_ids:
+                self.wire_ids.append(wire.id)
         else:
             print("wire model given to pin model is wrong type",type(wire))
         print("added wire",self.wire_ids)
@@ -294,6 +323,39 @@ class Wire:
     cross_section:Optional[float] = None
     graphics_item: Optional[any] = None
     length: float = 0.0  # length
+    # NEW: List of node IDs that this wire passes through (in order)
+    route: List[str] = field(default_factory=list)
+    
+    # NEW: List of routed graphics items representing this wire
+    routed_graphics: List[any] = field(default_factory=list)
+    
+    def add_route_node(self, node_id: str):
+        """Add a node to the wire's route"""
+        if node_id not in self.route:
+            self.route.append(node_id)
+    
+    def set_route(self, node_ids: List[str]):
+        """Set the complete route for this wire"""
+        self.route = node_ids.copy()
+    
+    def clear_route(self):
+        """Clear the wire's route"""
+        self.route.clear()
+    
+    def add_routed_graphics(self, graphics_item):
+        """Add a routed graphics item for this wire"""
+        if graphics_item not in self.routed_graphics:
+            self.routed_graphics.append(graphics_item)
+    
+    def remove_routed_graphics(self, graphics_item):
+        """Remove a routed graphics item"""
+        if graphics_item in self.routed_graphics:
+            self.routed_graphics.remove(graphics_item)
+    
+    def clear_routed_graphics(self):
+        """Clear all routed graphics items"""
+        self.routed_graphics.clear()
+
     def __str__(self):
         return self.id
     
@@ -312,8 +374,9 @@ class Wire:
             'part_number': self.part_number,
             'notes': self.notes,
             'cross_section': self.cross_section,
-            'length': self.length
+            'route': self.route  # NEW: Save route
         }
+
     
     @classmethod
     def from_dict(cls, data: dict) -> 'Wire':
@@ -331,7 +394,8 @@ class Wire:
             part_number=data.get('part_number'),
             notes=data.get('notes'),
             cross_section=data.get('cross_section'),
-            length=data.get('length')
+            length=data.get('length'),
+            route=data.get('route', [])
         )
 
 @dataclass
@@ -603,7 +667,8 @@ class WiringHarness:
     branches: Dict[str, HarnessBranch] = field(default_factory=dict)
     protections: Dict[str, BranchProtection] = field(default_factory=dict)
     nodes: Dict[str, Node] = field(default_factory=dict)
-    
+    segments: Dict[str, TopologySegment] = field(default_factory=dict)
+     
     def add_connector(self, connector: Connector) -> None:
         self.connectors[connector.id] = connector
         self.modified_date = datetime.now()
@@ -666,6 +731,7 @@ class WiringHarness:
             'connectors': {k: v.to_dict() for k, v in self.connectors.items()},
             'wires': {k: v.to_dict() for k, v in self.wires.items()},
             'bundles': {k: v.to_dict() for k, v in self.bundles.items()}, 
+            'segments': {k: v.to_dict() for k, v in self.segments.items()},
             'branches': {k: v.to_dict() for k, v in self.branches.items()},
             'protections': {k: v.to_dict() for k, v in self.protections.items()},
             'nodes': {k: v.to_dict() for k, v in self.nodes.items()}
@@ -685,17 +751,20 @@ class WiringHarness:
         
         for k, v in data.get('connectors', {}).items():
             harness.connectors[k] = Connector.from_dict(v)
-        
+ 
+        for k, v in data.get('segments', {}).items():
+            harness.segments[k] = TopologySegment.from_dict(v)
+
         for k, v in data.get('wires', {}).items():
             harness.wires[k] = Wire.from_dict(v)
         
-        for k, v in data.get('bundles', {}).items():  # ADD THIS
+        for k, v in data.get('bundles', {}).items():  
             harness.bundles[k] = Bundle.from_dict(v)
         
         for k, v in data.get('branches', {}).items():
             harness.branches[k] = HarnessBranch.from_dict(v)
         
-        for k, v in data.get('branch_points', {}).items():  # ADD THIS
+        for k, v in data.get('branch_points', {}).items():  
             harness.branch_points[k] = BranchPoint.from_dict(v)
 
         for k, v in data.get('protections', {}).items():
@@ -703,6 +772,53 @@ class WiringHarness:
         
         for k, v in data.get('nodes', {}).items():
             harness.nodes[k] = Node.from_dict(v)
-        
+        harness._update_ids_counter()
+
         return harness
+
+    def _update_ids_counter(self):
+        """Update the _ids counter to be greater than any existing ID numbers"""
+        max_num = 0
+        
+        # Check connector IDs
+        for conn_id in self.connectors.keys():
+            if conn_id.startswith('C'):
+                try:
+                    num = int(conn_id[1:])
+                    max_num = max(max_num, num)
+                except ValueError:
+                    pass
+        
+        # Check wire IDs
+        for wire_id in self.wires.keys():
+            if wire_id.startswith('W'):
+                try:
+                    num = int(wire_id[1:])
+                    max_num = max(max_num, num)
+                except ValueError:
+                    pass
+        
+        # Check bundle IDs
+        for bundle_id in self.bundles.keys():
+            if bundle_id.startswith('B'):
+                try:
+                    num = int(bundle_id[1:])
+                    max_num = max(max_num, num)
+                except ValueError:
+                    pass
+        
+        # Check branch point IDs
+        for bp_id in self.branch_points.keys():
+            if bp_id.startswith('BP'):
+                try:
+                    num = int(bp_id[2:])  # Skip 'BP' prefix
+                    max_num = max(max_num, num)
+                except ValueError:
+                    pass
+        
+        # Update the counter to max_num + 1
+        # Reset the counter and advance it
+        self.__class__._ids = count(max_num + 1)
+        
+        print(f"ID counter updated to start from {max_num + 1}")
 

@@ -10,7 +10,6 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QPointF
 from PyQt5.QtGui import QKeySequence, QIcon, QPainter
-
 from graphics.schematic_view import SchematicView
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import WireItem
@@ -22,22 +21,14 @@ from commands.undo_manager import UndoManager
 from utils.settings_manager import SettingsManager
 from utils.update_dispatcher import UpdateDispatcher
 from database.project_db import ProjectFileHandler
-
-# Import UI components
 from ui.objects_dock import ObjectsDock
 from ui.wires_tab import WiresTab
-
-# Import controllers
 from controllers.project_controller import ProjectController
 from controllers.selection_controller import SelectionController
-
-# Import menus
 from menus.file_menu import FileMenu
 from menus.edit_menu import EditMenu
 from menus.tools_menu import ToolsMenu
 from menus.test_menu import TestMenu
-
-# Import toolbars
 from toolbars.main_toolbar import MainToolbar
 from toolbars.edit_toolbar import EditToolbar
 from toolbars.import_toolbar import ImportToolbar
@@ -57,14 +48,14 @@ class MainWindow(QMainWindow):
         self.settings_manager = SettingsManager()
         # Setup UI
         self.setup_scene()
-        self.setup_ui()
+        
         self.setup_connections()
         self.setup_shortcuts()
         self.wiringharness = WiringHarness()
         
         self.topology_manager = TopologyManager(self)
-        self.update_dispatcher = UpdateDispatcher()
         self.viz_manager = VisualizationManager(self)
+        self.update_dispatcher = UpdateDispatcher()
         self.project_handler = ProjectFileHandler(self)
         # Connect signals
         self.update_dispatcher.connector_moved.connect(self.on_connector_moved)
@@ -101,7 +92,7 @@ class MainWindow(QMainWindow):
         # Final setup
         self.refresh_connector_labels()
         self.statusBar().showMessage("Loading complete...", 0)
-        
+        self.setup_ui()
      # Add helper properties for backward compatibility during transition
     
     @property
@@ -895,23 +886,33 @@ class MainWindow(QMainWindow):
     def _recreate_scene_from_models(self):
         """Recreate the entire scene from the wiring harness models"""
         from graphics.connector_item import ConnectorItem
-        from graphics.wire_item import WireItem
+        from graphics.wire_item import WireItem, SegmentedWireItem
         from graphics.bundle_item import BundleItem
-        from graphics.topology_item import BranchPointGraphicsItem
-        from PyQt5.QtWidgets import QTreeWidgetItem
-        from PyQt5.QtCore import Qt
-        from model.netlist import Netlist
+        from graphics.topology_item import BranchPointGraphicsItem, JunctionGraphicsItem
+        from model.topology import TopologyNode, BranchPointNode, JunctionNode, WireSegment
+        from model.models import TopologySegment
         
         # Clear existing scene
         self.scene.clear()
 
         
-        # Recreate connectors
+        # Clear topology manager but keep reference
+        self.topology_manager.nodes.clear()
+        self.topology_manager.segments.clear()
+        
+        # STEP 1: Recreate connector nodes
         for conn_model in self.wiringharness.connectors.values():
             conn_item = ConnectorItem(conn_model)
             conn_item.set_topology_manager(self.topology_manager)
             conn_item.set_main_window(self)
-            conn_item.create_topology_node()
+            
+            # Create topology node
+            node = TopologyNode(conn_model.id, conn_model.position)
+            node.node_type = "connector"
+            node.connector_ref = conn_item
+            self.topology_manager.nodes[node.id] = node
+            conn_item.topology_node = node
+            
             conn_item.setPos(conn_model.position[0], conn_model.position[1])
             conn_item.setRotation(conn_model.rotation)
             
@@ -924,31 +925,88 @@ class MainWindow(QMainWindow):
             self.objects_dock.connectors_tree.addTopLevelItem(item)
             conn_item.tree_item = item
             
-            # Register with repository
             self.register_graphics_item(conn_item, 'connectors')
         
-        # Recreate branch points
+        # STEP 2: Recreate branch point nodes
         for bp_model in self.wiringharness.branch_points.values():
-            from model.topology import BranchPointNode
-            bp_graphics = BranchPointGraphicsItem(bp_model, self)
-            
-            # Create topology node for backward compatibility
+            # Create topology node
             bp_node = BranchPointNode(bp_model.position, bp_model.branch_type)
             bp_node.id = bp_model.id
-            self.topology_manager.nodes[bp_model.id] = bp_node
+            self.topology_manager.nodes[bp_node.id] = bp_node
+            
+            # Create graphics
+            bp_graphics = BranchPointGraphicsItem(bp_model, self)
             bp_graphics.branch_node = bp_node
-            
             bp_graphics.setPos(bp_model.position[0], bp_model.position[1])
-            self.scene.addItem(bp_graphics)
             
-            # Register with repository
+            self.scene.addItem(bp_graphics)
             self.register_graphics_item(bp_graphics, 'branch_points')
         
-        # Create netlist
+        # STEP 3: Recreate segments from saved data
+        for seg_model in self.wiringharness.segments.values():
+            start_node = self.topology_manager.nodes.get(seg_model.start_node_id)
+            end_node = self.topology_manager.nodes.get(seg_model.end_node_id)
+            
+            if start_node and end_node:
+                # Create topology segment
+                segment = WireSegment(
+                    segment_id=seg_model.id,
+                    start_node=start_node,
+                    end_node=end_node,
+                    wires=[]
+                )
+                self.topology_manager.segments[segment.id] = segment
+                
+                # Create graphics
+                from graphics.segment_item import SegmentGraphicsItem
+                segment_graphics = SegmentGraphicsItem(segment, self.topology_manager)
+                self.scene.addItem(segment_graphics)
+        
+        # STEP 4: Recreate bundles
+        for bundle_model in self.wiringharness.bundles.values():
+            bundle_item = BundleItem(bundle_model, self)
+            
+            # Find start and end nodes
+            if bundle_model.start_node_id:
+                node = self.topology_manager.nodes.get(bundle_model.start_node_id)
+                if node:
+                    bundle_item.start_node = node
+                    # Find graphics for this node
+                    for item in self.scene.items():
+                        if hasattr(item, 'model') and item.model.id == node.id:
+                            bundle_item.start_item = item
+                            break
+            
+            if bundle_model.end_node_id:
+                node = self.topology_manager.nodes.get(bundle_model.end_node_id)
+                if node:
+                    bundle_item.end_node = node
+                    for item in self.scene.items():
+                        if hasattr(item, 'model') and item.model.id == node.id:
+                            bundle_item.end_item = item
+                            break
+            
+            # Restore wire assignments
+            bundle_item.wire_ids = bundle_model.wire_ids.copy()
+            bundle_item.wire_count = bundle_model.wire_count
+            
+            bundle_item.update_path()
+            self.scene.addItem(bundle_item)
+            self.bundles.append(bundle_item)
+            self.register_graphics_item(bundle_item, 'bundles')
+            
+            # Link bundle to its segment
+            for seg_id, seg_model in self.wiringharness.segments.items():
+                if seg_model.bundle_id == bundle_model.id:
+                    segment = self.topology_manager.segments.get(seg_id)
+                    if segment:
+                        bundle_item.segment = segment
+                        bundle_item.segment_graphics = None  # Will be set later
+        
+        # STEP 5: Recreate wires
         netlist = Netlist()
         self.topology_manager.set_netlist(netlist)
         
-        # Recreate wires
         for wire_model in self.wiringharness.wires.values():
             # Find connector graphics
             from_conn = None
@@ -970,12 +1028,11 @@ class MainWindow(QMainWindow):
             if not from_pin or not to_pin:
                 continue
             
-            # Create wire graphics
+            # Create direct wire item
             wire_item = WireItem(wire_model)
             wire_item.set_main_window(self)
             wire_item.connect_to_pins(from_pin, to_pin)
             
-            # Create net
             net = netlist.connect(from_pin, to_pin)
             wire_item.net = net
             
@@ -988,46 +1045,56 @@ class MainWindow(QMainWindow):
             self.objects_dock.wires_tab.wires_tree.addTopLevelItem(item)
             wire_item.tree_item = item
             
-            # Register with repository
             self.register_graphics_item(wire_item, 'wires')
-        
-        # Recreate bundles
-        for bundle_model in self.wiringharness.bundles.values():
-            bundle_item = BundleItem(bundle_model, self)
             
-            # Find start and end nodes
-            if bundle_model.start_node_id:
-                for node_id, node in self.topology_manager.nodes.items():
-                    if node.id == bundle_model.start_node_id:
-                        bundle_item.start_node = node
-                        # Find graphics for this node
-                        for item in self.scene.items():
-                            if hasattr(item, 'model') and item.model.id == node.id:
-                                bundle_item.start_item = item
-                                break
-                        break
+            # Add wire to segments based on saved segment wire_ids
+            path_segments = []
+            for seg_id, seg_model in self.wiringharness.segments.items():
+                if wire_model.id in seg_model.wire_ids:
+                    segment = self.topology_manager.segments.get(seg_id)
+                    if segment:
+                        path_segments.append(segment)
+                        if wire_model not in segment.wires:
+                            segment.wires.append(wire_model)
             
-            if bundle_model.end_node_id:
-                for node_id, node in self.topology_manager.nodes.items():
-                    if node.id == bundle_model.end_node_id:
-                        bundle_item.end_node = node
-                        # Find graphics for this node
-                        for item in self.scene.items():
-                            if hasattr(item, 'model') and item.model.id == node.id:
-                                bundle_item.end_item = item
-                                break
-                        break
-            
-            bundle_item.update_path()
-            self.scene.addItem(bundle_item)
-            self.bundles.append(bundle_item)
-            
-            # Register with repository
-            self.register_graphics_item(bundle_item, 'bundles')
+            # If wire has route, create SegmentedWireItem
+            if wire_model.route and path_segments:
+                routed_wire = SegmentedWireItem(
+                    wire_model=wire_model,
+                    path_segments=path_segments,
+                    main_window=self
+                )
+                routed_wire.connect_to_pins(from_pin, to_pin)
+                routed_wire.original_wire = wire_item
+                
+                self.scene.addItem(routed_wire)
+                
+                if not hasattr(self, 'routed_wire_items'):
+                    self.routed_wire_items = []
+                self.routed_wire_items.append(routed_wire)
+                
+                self.register_graphics_item(routed_wire, 'routed_wires')
+                wire_model.add_routed_graphics(routed_wire)
+                
+                # Hide direct wire by default
+                wire_item.setVisible(False)
         
         # Refresh trees
         self.refresh_tree_views()
         self.refresh_bundle_tree()
+
+        
+        
+
+    def _find_segment_between_nodes(self, node1, node2):
+        """Find existing segment between two nodes"""
+        for segment in self.topology_manager.segments.values():
+            print(segments,"s")
+            if (segment.start_node == node1 and segment.end_node == node2) or \
+               (segment.start_node == node2 and segment.end_node == node1):
+                return segment
+        return None
+
     
     def publish_project(self):
         """Publish current project to central database"""
