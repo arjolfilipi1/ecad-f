@@ -406,7 +406,7 @@ class Connector:
     type: ConnectorType
     gender: Gender
     seal: SealType
-    series :str=None
+    series: str = None
     part_number: Optional[str] = None
     manufacturer: Optional[str] = None
     pins: Dict[str, Pin] = field(default_factory=dict)
@@ -414,20 +414,9 @@ class Connector:
     description: Optional[str] = None
     rotation: int = 0
     graphics_item: Optional[any] = None
+    table_pos: Tuple[float, float] = (25.0, -15.0)  # NEW: Store table position offset
     
-    @property
-    def wire_count(self) -> int:
-        return sum(1 for pin in self.pins.values() if pin.wire_ids)
-    
-    @property
-    def pin_count(self) -> int:
-        return len(self.pins)
-    
-    def add_pin(self, pin: Pin) -> None:
-        self.pins[pin.number] = pin
-    
-    def get_pin(self, number: str) -> Optional[Pin]:
-        return self.pins.get(number)
+    # ... rest of the class ...
     
     def to_dict(self) -> dict:
         return {
@@ -436,11 +425,14 @@ class Connector:
             'type': self.type.value,
             'gender': self.gender.value,
             'seal': self.seal.value,
+            'series': self.series,
             'part_number': self.part_number,
             'manufacturer': self.manufacturer,
             'pins': {num: pin.to_dict() for num, pin in self.pins.items()},
             'position': self.position,
-            'description': self.description
+            'description': self.description,
+            'rotation': self.rotation,
+            'table_pos': self.table_pos  # NEW: Save table position
         }
     
     @classmethod
@@ -451,13 +443,15 @@ class Connector:
             type=ConnectorType(data['type']),
             gender=Gender(data['gender']),
             seal=SealType(data['seal']),
+            series=data.get('series'),
             part_number=data.get('part_number'),
             manufacturer=data.get('manufacturer'),
             position=tuple(data.get('position', (0, 0))),
-            description=data.get('description')
+            description=data.get('description'),
+            rotation=data.get('rotation', 0),
+            table_pos=tuple(data.get('table_pos', (25.0, -15.0)))  # NEW: Load table position
         )
         for pin_num, pin_data in data.get('pins', {}).items():
-            print(pin_data)
             connector.pins[pin_num] = Pin.from_dict(pin_data)
         return connector
 

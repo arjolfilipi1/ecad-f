@@ -100,7 +100,7 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         self.model.graphics_item = self  # Set reverse reference
         self.main_window = main_window
         self.node_type = "Branch point"
-        self.branch_node = None  # For backward compatibility
+
         
         # Set position from model
         self.setPos(model.position[0], model.position[1])

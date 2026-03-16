@@ -44,7 +44,14 @@ class PropertyEditor(QWidget):
 
     
     def set_item(self, item):
-        """Set the item to edit"""
+        """Set the item to edit - if same item, just update values"""
+        
+        # If it's the same item, just update the values without rebuilding
+        if item is not None and self.current_item is not None and item == self.current_item:
+            self._update_values(item)
+            return
+        
+        # Otherwise, do a full rebuild
         self.current_item = item
         self.clear_content()
         
@@ -72,6 +79,284 @@ class PropertyEditor(QWidget):
             self.create_bundle_editor(item)
         else:
             self.create_random_editor(item)
+
+    def _update_values(self, item):
+        """Update existing widgets with new values without rebuilding"""
+        if self.current_type == 'connector':
+            self._update_connector_values(item)
+        elif self.current_type == 'wire':
+            self._update_wire_values(item)
+        elif self.current_type == 'bundle':
+            self._update_bundle_values(item)
+        # Add other types as needed
+
+    def _update_connector_values(self, item):
+        """Update connector values in existing widgets"""
+        # Find and update each widget
+        for i in range(self.content_layout.count()):
+            widget = self.content_layout.itemAt(i).widget()
+            if not widget:
+                continue
+            
+            # Update basic properties
+            if isinstance(widget, QGroupBox) and widget.title() == "Basic Properties":
+                form = widget.layout()
+                
+                # Iterate through all rows to find widgets by their labels
+                for row in range(form.rowCount()):
+                    label_item = form.itemAt(row, QFormLayout.LabelRole)
+                    field_item = form.itemAt(row, QFormLayout.FieldRole)
+                    
+                    if not label_item or not field_item:
+                        continue
+                    
+                    label_widget = label_item.widget()
+                    field_widget = field_item.widget()
+                    
+                    if not label_widget or not field_widget:
+                        continue
+                    
+                    # Update based on label text
+                    label_text = label_widget.text().replace(":*", "").replace(":", "")
+                    
+                    if label_text == "Name" and isinstance(field_widget, QLineEdit):
+                        field_widget.setText(getattr(item.model, 'name', ''))
+                    
+                    elif label_text == "Part Number" and isinstance(field_widget, QLineEdit):
+                        field_widget.setText(getattr(item.model, 'part_number', ''))
+                    
+                    elif label_text == "Manufacturer" and isinstance(field_widget, QLineEdit):
+                        field_widget.setText(getattr(item.model, 'manufacturer', ''))
+            
+            # Update position values
+            elif isinstance(widget, QGroupBox) and widget.title() == "Position":
+                form = widget.layout()
+                
+                for row in range(form.rowCount()):
+                    label_item = form.itemAt(row, QFormLayout.LabelRole)
+                    field_item = form.itemAt(row, QFormLayout.FieldRole)
+                    
+                    if not label_item or not field_item:
+                        continue
+                    
+                    label_widget = label_item.widget()
+                    field_widget = field_item.widget()
+                    
+                    if not label_widget or not field_widget:
+                        continue
+                    
+                    label_text = label_widget.text().replace(":", "")
+                    
+                    if label_text == "X" and isinstance(field_widget, QDoubleSpinBox):
+                        field_widget.setValue(item.pos().x())
+                    
+                    elif label_text == "Y" and isinstance(field_widget, QDoubleSpinBox):
+                        field_widget.setValue(item.pos().y())
+                    
+                    elif label_text == "Rotation" and isinstance(field_widget, QSpinBox):
+                        field_widget.setValue(int(item.model.rotation))
+            
+            # Update pins group
+            elif isinstance(widget, QGroupBox) and "Pins" in widget.title():
+                pins_layout = widget.layout()
+                
+                # Count current pin widgets
+                pin_widgets = []
+                for j in range(pins_layout.count()):
+                    pin_widget = pins_layout.itemAt(j).widget()
+                    if pin_widget and hasattr(pin_widget, 'layout'):  # Pin widget has its own layout
+                        pin_widgets.append(pin_widget)
+                
+                # If pin count changed, recreate the group
+                if len(pin_widgets) != len(item.model.pins):
+                    # Remove old group
+                    widget.deleteLater()
+                    
+                    # Create new pins group
+                    pins_group = QGroupBox(f"Pins ({len(item.pins)})")
+                    new_pins_layout = QVBoxLayout(pins_group)
+                    
+                    for pin in item.model.pins.values():
+                        pin_widget = self.create_pin_editor(pin)
+                        new_pins_layout.addWidget(pin_widget)
+                    
+                    # Insert at same position
+                    self.content_layout.insertWidget(i, pins_group)
+                
+                else:
+                    # Update existing pin widgets
+                    for j, pin in enumerate(item.model.pins.values()):
+                        if j < len(pin_widgets):
+                            pin_widget = pin_widgets[j]
+                            # Update wire label in pin widget
+                            for k in range(pin_widget.layout().count()):
+                                child = pin_widget.layout().itemAt(k).widget()
+                                if isinstance(child, QLabel):
+                                    if pin.wire_ids:
+                                        if child.text().startswith("→") or child.text() == "(no wire)":
+                                            child.setText(f"→ {pin.wire_ids[0]}")
+                                            child.setStyleSheet("color: green;")
+                                    else:
+                                        if child.text().startswith("→"):
+                                            child.setText("(no wire)")
+                                            child.setStyleSheet("color: gray;")
+
+    def _update_wire_values(self, item):
+        """Update wire values in existing widgets"""
+        for i in range(self.content_layout.count()):
+            widget = self.content_layout.itemAt(i).widget()
+            if not widget:
+                continue
+            
+            # Update basic properties
+            if isinstance(widget, QGroupBox) and widget.title() == "Wire Properties":
+                form = widget.layout()
+                
+                for row in range(form.rowCount()):
+                    label_item = form.itemAt(row, QFormLayout.LabelRole)
+                    field_item = form.itemAt(row, QFormLayout.FieldRole)
+                    
+                    if not label_item or not field_item:
+                        continue
+                    
+                    label_widget = label_item.widget()
+                    field_widget = field_item.widget()
+                    
+                    if not label_widget or not field_widget:
+                        continue
+                    
+                    label_text = label_widget.text().replace(":", "")
+                    
+                    if label_text == "Signal" and isinstance(field_widget, QLineEdit):
+                        field_widget.setText(getattr(item, 'signal_name', ''))
+                    
+                    elif label_text == "Cross Section (mm²)" and isinstance(field_widget, QDoubleSpinBox):
+                        field_widget.setValue(getattr(item, 'cross_section', 0.5))
+                    
+                    elif label_text == "Color" and isinstance(field_widget, QLineEdit):
+                        field_widget.setText(item.color_data.code if hasattr(item, 'color_data') else 'SW')
+            
+            # Update route info
+            elif isinstance(widget, QGroupBox) and widget.title() == "Route":
+                form = widget.layout()
+                
+                for row in range(form.rowCount()):
+                    label_item = form.itemAt(row, QFormLayout.LabelRole)
+                    field_item = form.itemAt(row, QFormLayout.FieldRole)
+                    
+                    if not label_item or not field_item:
+                        continue
+                    
+                    field_widget = field_item.widget()
+                    if isinstance(field_widget, QLabel):
+                        field_widget.setText(str(item.model.route))
+
+    def _update_bundle_values(self, item):
+        """Update bundle values in existing widgets"""
+        for i in range(self.content_layout.count()):
+            widget = self.content_layout.itemAt(i).widget()
+            if not widget:
+                continue
+            
+            # Update basic properties
+            if isinstance(widget, QGroupBox) and widget.title() == "Basic Properties":
+                form = widget.layout()
+                
+                for row in range(form.rowCount()):
+                    label_item = form.itemAt(row, QFormLayout.LabelRole)
+                    field_item = form.itemAt(row, QFormLayout.FieldRole)
+                    
+                    if not label_item or not field_item:
+                        continue
+                    
+                    label_widget = label_item.widget()
+                    field_widget = field_item.widget()
+                    
+                    if not label_widget or not field_widget:
+                        continue
+                    
+                    label_text = label_widget.text().replace(":", "")
+                    
+                    if label_text == "Name" and isinstance(field_widget, QLineEdit):
+                        field_widget.setText(getattr(item.model, 'name', item.model.id))
+            
+            # Update length values
+            elif isinstance(widget, QGroupBox) and widget.title() == "Length":
+                form = widget.layout()
+                
+                for row in range(form.rowCount()):
+                    label_item = form.itemAt(row, QFormLayout.LabelRole)
+                    field_item = form.itemAt(row, QFormLayout.FieldRole)
+                    
+                    if not label_item or not field_item:
+                        continue
+                    
+                    label_widget = label_item.widget()
+                    field_widget = field_item.widget()
+                    
+                    if not label_widget or not field_widget:
+                        continue
+                    
+                    label_text = label_widget.text().replace(":", "")
+                    
+                    if label_text == "Actual" and isinstance(field_widget, QDoubleSpinBox):
+                        field_widget.setValue(item.model.length)
+                    
+                    elif label_text == "Specified" and isinstance(field_widget, QDoubleSpinBox):
+                        current = item.model.specified_length if item.model.specified_length is not None else item.model.length
+                        field_widget.setValue(current)
+            
+            # Update wire table
+            elif isinstance(widget, QGroupBox) and "Wires in Bundle" in widget.title():
+                for j in range(widget.layout().count()):
+                    table = widget.layout().itemAt(j).widget()
+                    if isinstance(table, QTableWidget):
+                        self._update_bundle_wire_table(table, item)
+                        break
+    def _update_bundle_wire_table(self, table, bundle_item):
+        """Update bundle wire table contents"""
+        table.setRowCount(bundle_item.wire_count)
+        
+        for i, wire_id in enumerate(bundle_item.wire_ids):
+            # Wire ID
+            table.setItem(i, 0, QTableWidgetItem(wire_id))
+            
+            # Look up wire details
+            color_text = "?"
+            from_to_text = ""
+            
+            if hasattr(self.main_window, 'imported_wire_items'):
+                for wire in self.main_window.imported_wire_items:
+                    if wire.wid == wire_id:
+                        if hasattr(wire, 'color_data'):
+                            color_text = wire.color_data.code
+                        
+                        # Get from→to info
+                        from_pin = f"{wire.start_pin.parent.model.id}:{wire.start_pin.original_id}"
+                        to_pin = f"{wire.end_pin.parent.model.id}:{wire.end_pin.original_id}"
+                        from_to_text = f"{from_pin} → {to_pin}"
+                        break
+            
+            # Color
+            color_item = QTableWidgetItem(color_text)
+            if color_text != "?":
+                color_map = {
+                    'SW': QColor(0, 0, 0), 'RT': QColor(255, 0, 0),
+                    'GN': QColor(0, 255, 0), 'BL': QColor(0, 0, 255),
+                    'GE': QColor(255, 255, 0), 'BR': QColor(165, 42, 42),
+                    'WS': QColor(255, 255, 255), 'GR': QColor(128, 128, 128),
+                }
+                bg_color = color_map.get(color_text, QColor(200, 200, 200))
+                color_item.setBackground(bg_color)
+                if color_text in ['SW', 'BR', 'BL']:
+                    color_item.setForeground(Qt.white)
+            table.setItem(i, 1, color_item)
+            
+            # Signal
+            table.setItem(i, 2, QTableWidgetItem(""))
+            
+            # From→To
+            table.setItem(i, 3, QTableWidgetItem(from_to_text))
     
     def clear_content(self):
         """Clear all property widgets but keep the stretch at the end"""
@@ -429,17 +714,9 @@ class PropertyEditor(QWidget):
         if self.current_item is None:
             return
         
-        # Store current item
-        item = self.current_item
+        # Just update values without rebuilding
+        self._update_values(self.current_item)
         
-        # Block signals during refresh
-        self.blockSignals(True)
-        
-        # Clear and rebuild
-        # self.clear_content()
-        self.set_item(item)
-        
-        self.blockSignals(False)
         self.update()
 
         

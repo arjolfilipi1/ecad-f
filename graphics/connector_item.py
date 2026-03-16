@@ -18,6 +18,9 @@ class ConnectorItem(QGraphicsRectItem):
             pins: either integer pin count or list of pin identifiers (strings)
         """
         super().__init__(QRectF(-20, -10, 40, 20))
+        self._table_setup_done = False
+        self._setting_up_table = False
+    
         # Remove the default selection rectangle
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -25,9 +28,9 @@ class ConnectorItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.ItemIsFocusable, True)  # For hover events
 
         # Enable hover events
-        self.setAcceptHoverEvents(True)
         self.pins:[PinItem] = []
         self.model = model
+        self.setAcceptHoverEvents(True)
         self.model.graphics_item = self  # Set reverse reference
         self._label = QGraphicsSimpleTextItem(self.model.id, self)
         self.tree_item = None     
@@ -56,12 +59,12 @@ class ConnectorItem(QGraphicsRectItem):
         
         self._create_pins_from_model()
         from graphics.connector_info_table import ConnectorInfoTable
-        self.info_table = ConnectorInfoTable(self)
+        self.info_table = None
         self.compact_mode = False
         if hasattr(self, 'main_window') and self.main_window:
             self.main_window.register_graphics_item(self, 'connectors')
         self.shadow = QGraphicsDropShadowEffect()
-        self.setup_info_table()
+        # self.setup_info_table()
         # 2. Configure properties
         self.shadow.setBlurRadius(10)             # Softness of the shadow (default is 1)
         self.shadow.setXOffset(5)                 # Horizontal displacement
@@ -161,12 +164,26 @@ class ConnectorItem(QGraphicsRectItem):
         return positions
     
     def itemChange(self, change, value):
+        # if (not hasattr(self, 'info_table') or not self.info_table) and hasattr(self, 'model'):
+        #     self.setup_info_table()
+        
         if change == self.ItemSelectedChange:
             self.update()
             
-        if change == QGraphicsItem.GraphicsItemChange.ItemSceneHasChanged:
+        elif change == QGraphicsItem.GraphicsItemChange.ItemSceneHasChanged:
             if self.scene() is None:
                 self.cleanup()
+            else:
+                # Scene changed TO a scene (not None)
+                # Use a flag to prevent multiple setups
+                if not hasattr(self, '_table_setup_done'):
+                    self._table_setup_done = False
+                
+                if not self._table_setup_done:
+                    self._table_setup_done = True
+                    # Use singleShot to avoid recursion during scene change
+                    from PyQt5.QtCore import QTimer
+                    QTimer.singleShot(0, self.setup_info_table)
             
         elif change == self.ItemPositionChange:
             self.old_pos = self.pos()
@@ -175,12 +192,12 @@ class ConnectorItem(QGraphicsRectItem):
             # Notify main window
             if self.main_window and hasattr(self.main_window, 'update_dispatcher'):
                 self.main_window.update_dispatcher.notify_connector_moved(self)
-            # if hasattr(self, 'info_table') and self.info_table is not None:
-                # self.info_table.update_table()
+            
             # Update topology node position
             if self.topology_node:
                 self.topology_node.position = (self.pos().x(), self.pos().y())
-            self.model.position = [self.pos().x(),self.pos().y()]
+            self.model.position = [self.pos().x(), self.pos().y()]
+            
             # Update pins
             for pin in self.pins:
                 pin.invalidate_cache()
@@ -191,15 +208,16 @@ class ConnectorItem(QGraphicsRectItem):
             # Update segments
             self._update_connected_segments()
             
-            # NEW: Update connected bundles
+            # Update connected bundles
             self._update_connected_bundles()
             
             # Update label
             self.update_label_pos()
             
-
+            # Update info table position if it exists
             if hasattr(self, 'info_table') and self.info_table is not None:
-                self.info_table.update_table()
+                self.info_table.update_position()
+                
         elif change == self.ItemRotationHasChanged:
             # Handle rotation
             self._update_pin_positions_after_rotation()
@@ -208,8 +226,11 @@ class ConnectorItem(QGraphicsRectItem):
                     if hasattr(wire, 'update_path'):
                         wire.update_path()
             self._update_connected_segments()
-            # NEW: Update connected bundles (rotation affects pin positions)
             self._update_connected_bundles()
+            
+            # Update info table rotation if it exists
+            if hasattr(self, 'info_table') and self.info_table is not None:
+                self.info_table.update_position()
         
         return super().itemChange(change, value)
 
@@ -367,10 +388,30 @@ class ConnectorItem(QGraphicsRectItem):
             self.info_table = None
         
     def setup_info_table(self):
-        if self.info_table is None:
-            """Create or recreate the info table"""
-            from graphics.connector_info_table import ConnectorInfoTable
+        """Create or recreate the info table"""
+        from graphics.connector_info_table import ConnectorInfoTable
+        
+        # Prevent multiple simultaneous setups
+        if hasattr(self, '_setting_up_table') and self._setting_up_table:
+            return
+        
+        self._setting_up_table = True
+        
+        try:
+            # Remove existing table if any
+            if hasattr(self, 'info_table') and self.info_table:
+                try:
+                    self.info_table.deleteLater()
+                    self.info_table = None
+                except:
+                    pass
+            
+            # Create new table as child item
             self.info_table = ConnectorInfoTable(self)
-            # Position it correctly
-            self.info_table.setPos(25, -15)
-
+            
+            # Force an update
+            self.info_table.update_table()
+            
+            print(f"Info table setup for {self.model.id}")
+        finally:
+            self._setting_up_table = False
