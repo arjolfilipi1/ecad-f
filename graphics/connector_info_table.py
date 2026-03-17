@@ -10,7 +10,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
     def __init__(self, connector):
         super().__init__()
         self.connector = connector
-        self.setFlag(self.ItemIsMovable, True)
+        self.setFlag(self.ItemIsMovable, False)
         self.setFlag(self.ItemIsSelectable, True)
         self.setFlag(self.ItemSendsGeometryChanges, True)
         self.setZValue(10)
@@ -71,15 +71,16 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         # Initial update
         self.update_table()
         
-        print(f"Table created for {connector.model.id} at offset {self.offset}")
+
     
     def update_position(self):
         """Update position and rotation based on connector"""
         if not self.connector:
             return
-        
+        ori = self.connector.scenePos()
+        print(self.parent())
         # Position relative to connector
-        self.setPos(self.offset)
+        self.setPos(QPointF(ori.x() + self.offset.x(),ori.y() + self.offset.y() ))
         
         # Counter-rotate to stay upright
         self.setRotation(-self.connector.rotation())
@@ -140,7 +141,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
         self.table.setFixedSize(total_width, total_height)
         self.resize(total_width-23, total_height-9)
         
-        print(f"Table updated for {self.connector.model.id} with {len(pins)} pins")
+
     
     def mousePressEvent(self, event):
         """Handle mouse press for dragging"""
@@ -203,7 +204,7 @@ class ConnectorInfoTable(QGraphicsProxyWidget):
                             self.drag_start_offset, 
                             self.offset
                         )
-        
+        self.update_position()
         super().mouseReleaseEvent(event)
 
     def _create_position_undo_command(self, old_offset, new_offset):

@@ -414,7 +414,7 @@ class Connector:
     description: Optional[str] = None
     rotation: int = 0
     graphics_item: Optional[any] = None
-    table_pos: Tuple[float, float] = (25.0, -15.0)  # NEW: Store table position offset
+    table_pos: Tuple[float, float] = (25.0, -15.0) 
     
     # ... rest of the class ...
     
@@ -432,7 +432,7 @@ class Connector:
             'position': self.position,
             'description': self.description,
             'rotation': self.rotation,
-            'table_pos': self.table_pos  # NEW: Save table position
+            'table_pos': self.table_pos 
         }
     
     @classmethod
@@ -449,7 +449,7 @@ class Connector:
             position=tuple(data.get('position', (0, 0))),
             description=data.get('description'),
             rotation=data.get('rotation', 0),
-            table_pos=tuple(data.get('table_pos', (25.0, -15.0)))  # NEW: Load table position
+            table_pos=tuple(data.get('table_pos', (25.0, -15.0)))  
         )
         for pin_num, pin_data in data.get('pins', {}).items():
             connector.pins[pin_num] = Pin.from_dict(pin_data)

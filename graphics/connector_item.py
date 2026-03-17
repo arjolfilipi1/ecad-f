@@ -10,7 +10,6 @@ from model.models import Connector,ConnectorType,Gender,SealType,Pin
 
 class ConnectorItem(QGraphicsRectItem):
     
-    
     def __init__(self,model:Connector):
         """
         Args:
@@ -72,10 +71,12 @@ class ConnectorItem(QGraphicsRectItem):
         self.shadow.setColor(QColor(250, 250, 250, 160)) # Shadow color with transparency
         self.setGraphicsEffect(self.shadow)
         self.shadow.setEnabled(True)
+        
     def update_info_display(self):
         """Refresh the info table"""
         if hasattr(self, 'info_table'):
             self.info_table.update_table()
+            
     def toggle_info_display(self):
         """Toggle between compact and full table view"""
         from graphics.connector_info_table import ConnectorInfoTable, CompactConnectorInfoTable
@@ -95,10 +96,13 @@ class ConnectorItem(QGraphicsRectItem):
         self.compact_mode = not self.compact_mode
         self.info_table.setPos(pos)
         self.info_table.update_table()
+        
     def get_node(self):
         return self.topology_node
+        
     def __str__(self):
         return self.model.id
+        
     def _update_connected_bundles(self):
         """Update all bundles connected to this connector"""
         if not self.topology_node:
@@ -110,8 +114,6 @@ class ConnectorItem(QGraphicsRectItem):
             for bundle in self.main_window.bundles:
                 if bundle.start_node == self.topology_node or bundle.end_node == self.topology_node:
                     bundle.update_position_from_nodes()
-
-    
     
     def _create_pins_from_model(self):
         """Create pin graphics items from the model"""
@@ -234,8 +236,6 @@ class ConnectorItem(QGraphicsRectItem):
         
         return super().itemChange(change, value)
 
-
-    
     def _update_pin_positions_after_rotation(self):
         """Recalculate pin positions in scene coordinates after rotation"""
         # Get the transformation matrix
