@@ -275,20 +275,38 @@ class ConnectorItem(QGraphicsRectItem):
                         wire.graphics_item.update_path()
     def setRotation(self, angle: float) -> None:
         """
-        Override setRotation to also update the model's rotation.
-        
-        Args:
-            angle: Rotation angle in degrees
+        Override setRotation to also update the model's rotation
+        AND keep the info table visually in the same scene position.
         """
-        # Call the parent class method
+
+        # --- 1. Store table scene position BEFORE rotation ---
+        table_scene_pos = None
+        if hasattr(self, 'info_table') and self.info_table:
+            table_scene_pos = self.info_table.scenePos()
+
+        # --- 2. Apply rotation ---
         super().setRotation(angle)
-        
-        # Update the model's rotation
+
+        # --- 3. Update model ---
         if hasattr(self, 'model') and self.model:
             self.model.rotation = angle
-            
-        # Update pins and connected elements
+
+        # --- 4. Update pins / wires ---
         self._update_pin_positions_after_rotation()
+
+        # --- 5. Restore table position ---
+        if table_scene_pos and self.info_table:
+            # Convert scene position back to LOCAL (connector space)
+            new_local_pos = self.mapFromScene(table_scene_pos)
+
+            # Update offset
+            self.info_table.offset = new_local_pos
+
+            # Apply it
+            self.info_table.setPos(new_local_pos)
+
+            # Keep upright
+            self.info_table.setRotation(-self.rotation())
     def rotate_90(self):
         """Rotate connector by 90 degrees"""
         self.model.rotation = (self.model.rotation + 90) % 360
