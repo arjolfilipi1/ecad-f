@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QInputDialog, QFileDialog
 )
 from PyQt5.QtCore import Qt, QPointF
-from PyQt5.QtGui import QKeySequence, QIcon, QPainter
+from PyQt5.QtGui import QKeySequence, QIcon, QPainter,QCursor
 from graphics.schematic_view import SchematicView
 from graphics.connector_item import ConnectorItem
 from graphics.wire_item import WireItem
@@ -1182,7 +1182,7 @@ class MainWindow(QMainWindow):
                 item_id = item.bundle_id
                 item_type = 'bundles'
             elif hasattr(item, 'branch_node'):
-                item_id = item.branch_node.id
+                item_id = item.model.id
                 item_type = 'branch_points'
             elif hasattr(item, 'junction_node'):
                 item_id = item.junction_node.id
@@ -1198,7 +1198,7 @@ class MainWindow(QMainWindow):
             elif item_type == 'bundles':
                 item_id = item.bundle_id
             elif item_type == 'branch_points':
-                item_id = item.branch_node.id
+                item_id = item.model.id
             elif item_type == 'junctions':
                 item_id = item.junction_node.id
             else:
@@ -1227,7 +1227,7 @@ class MainWindow(QMainWindow):
                 item_id = item.bundle_id
                 item_type = 'bundles'
             elif hasattr(item, 'branch_node'):
-                item_id = item.branch_node.id
+                item_id = item.model.id
                 item_type = 'branch_points'
             elif hasattr(item, 'junction_node'):
                 item_id = item.junction_node.id
@@ -1242,7 +1242,7 @@ class MainWindow(QMainWindow):
             elif item_type == 'bundles':
                 item_id = item.bundle_id
             elif item_type == 'branch_points':
-                item_id = item.branch_node.id
+                item_id = item.model.id
             elif item_type == 'junctions':
                 item_id = item.junction_node.id
             else:

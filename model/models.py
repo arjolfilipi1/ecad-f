@@ -620,6 +620,7 @@ class BranchPoint:
     branch_type: str = "split"  # "split", "merge", "splice"
     node_id: Optional[str] = None  # Reference to topology node
     connected_segments: List[str] = field(default_factory=list)  # IDs of connected segments
+    connected_bundle_ids: List[str] = field(default_factory=list)  # NEW: IDs of connected bundles
     graphics_item: Optional[any] = None
     
     def to_dict(self) -> dict:
@@ -629,7 +630,8 @@ class BranchPoint:
             'position': self.position,
             'branch_type': self.branch_type,
             'node_id': self.node_id,
-            'connected_segments': self.connected_segments
+            'connected_segments': self.connected_segments,
+            'connected_bundle_ids': self.connected_bundle_ids  # NEW: Save connected bundles
         }
     
     @classmethod
@@ -640,8 +642,10 @@ class BranchPoint:
             position=tuple(data.get('position', (0, 0))),
             branch_type=data.get('branch_type', 'split'),
             node_id=data.get('node_id'),
-            connected_segments=data.get('connected_segments', [])
+            connected_segments=data.get('connected_segments', []),
+            connected_bundle_ids=data.get('connected_bundle_ids', [])  # NEW: Load connected bundles
         )
+
 
 @dataclass
 class WiringHarness:

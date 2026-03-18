@@ -155,7 +155,7 @@ class HarnessAutoRouter:
             
             # Create graphics
             from graphics.topology_item import BranchPointGraphicsItem
-            bp_graphics = BranchPointGraphicsItem(bp)
+            bp_graphics = BranchPointGraphicsItem(bp,self.main_window)
             self.main_window.scene.addItem(bp_graphics)
             self.branch_points.append(bp_graphics)
             
@@ -369,7 +369,7 @@ class ManualRouter:
         )
         bp_node = self.topology_manager.create_branch_point((pos.x(), pos.y()))
         from graphics.topology_item import BranchPointGraphicsItem
-        bp_graphics = BranchPointGraphicsItem(bp_node)
+        bp_graphics = BranchPointGraphicsItem(bp_node,self.main_window)
         self.main_window.scene.addItem(bp_graphics)
         return bp_graphics
     

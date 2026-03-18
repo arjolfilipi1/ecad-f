@@ -8,6 +8,7 @@ from tools.floating_input import FloatingInputWindow
 import math
 from PyQt5.QtCore import QObject
 from graphics.topology_item import FastenerGraphicsItem
+from model.models import BranchPoint
 
 class BundleDrawTool(QObject):
     """Interactive tool for drawing continuous bundle segments like a polyline"""
@@ -296,8 +297,9 @@ class BundleDrawTool(QObject):
         """Create a bundle segment from current start to end position"""
         from model.models import Bundle
         from graphics.bundle_item import BundleItem
-
-        # Check if end point is on an existing item
+        from commands.bundle_commands import AddBundleCommand
+        from commands.topology_commands import AddBranchPointCommand
+        
         items = self.scene.items(end_pos)
         end_item = None
         end_node = None
@@ -308,11 +310,10 @@ class BundleDrawTool(QObject):
                 break
         
         if end_item:
-            # End on existing item - use its node
             if isinstance(end_item, ConnectorItem):
                 end_node = end_item.topology_node
             elif isinstance(end_item, BranchPointGraphicsItem):
-                end_node = end_item.branch_node
+                end_node = end_item.get_node()
             elif isinstance(end_item, JunctionGraphicsItem):
                 end_node = end_item.junction_node
             elif isinstance(end_item, FastenerGraphicsItem):
@@ -320,15 +321,29 @@ class BundleDrawTool(QObject):
             end_pos = end_item.pos()
         elif self.auto_create_nodes:
             # Create new branch point at end position
-            from model.topology import BranchPointNode
-            from graphics.topology_item import BranchPointGraphicsItem
+            bp_id = self.main_window.wiringharness.next_bpid()
+            bp_model = BranchPoint(
+                id=bp_id,
+                name=bp_id,
+                position=(end_pos.x(), end_pos.y()),
+                branch_type="junction"
+            )
             
-            node = BranchPointNode((end_pos.x(), end_pos.y()), "junction")
-            graphics = BranchPointGraphicsItem(node)
-            self.scene.addItem(graphics)
-            self.main_window.topology_manager.nodes[node.id] = node
-            end_node = node
-            end_item = graphics
+            # Create graphics
+            from graphics.topology_item import BranchPointGraphicsItem
+            bp_graphics = BranchPointGraphicsItem(bp_model, self.main_window)
+            
+            # Add with undo command
+            cmd = AddBranchPointCommand(
+                self.scene,
+                bp_graphics,
+                (end_pos.x(), end_pos.y()),
+                main_window=self.main_window
+            )
+            self.main_window.undo_manager.push(cmd)
+            
+            end_node = bp_graphics.get_node()
+            end_item = bp_graphics
         
         # Create bundle model
         bundle_id = self.main_window.wiringharness.next_bid()
@@ -338,21 +353,31 @@ class BundleDrawTool(QObject):
             start_point=(self.current_segment_start.x(), self.current_segment_start.y()),
             end_point=(end_pos.x(), end_pos.y()),
             specified_length=specified_length,
-            auto_created=False
+            auto_created=False,
+            start_node_id=self.current_start_node.id if self.current_start_node else None,
+            end_node_id=end_node.id if end_node else None
         )
         
-        # Add to harness
         self.main_window.wiringharness.add_bundle(bundle_model)
         
-        # Create bundle graphics from model
         bundle = BundleItem(bundle_model, self.main_window)
-        
-        # Store node references with graphics items
-        bundle.set_start_node(self.current_start_item.get_node(), self.current_start_item)
+        bundle.set_start_node(self.current_start_node, self.current_start_item)
         bundle.set_end_node(end_node, end_item)
         
-        # Add to scene using undo command
-        from commands.bundle_commands import AddBundleCommand
+        # If end node is a branch point, add this bundle to its connected bundles list
+        if end_node and hasattr(end_node, 'branch_point') and end_node.branch_point:
+            if not hasattr(end_node.branch_point.model, 'connected_bundle_ids'):
+                end_node.branch_point.model.connected_bundle_ids = []
+            if bundle_id not in end_node.branch_point.model.connected_bundle_ids:
+                end_node.branch_point.model.connected_bundle_ids.append(bundle_id)
+        
+        # If start node is a branch point, add this bundle to its connected bundles list
+        if self.current_start_node and hasattr(self.current_start_node, 'branch_point') and self.current_start_node.branch_point:
+            if not hasattr(self.current_start_node.branch_point.model, 'connected_bundle_ids'):
+                self.current_start_node.branch_point.model.connected_bundle_ids = []
+            if bundle_id not in self.current_start_node.branch_point.model.connected_bundle_ids:
+                self.current_start_node.branch_point.model.connected_bundle_ids.append(bundle_id)
+        
         cmd = AddBundleCommand(
             self.scene,
             bundle,
@@ -362,15 +387,12 @@ class BundleDrawTool(QObject):
         )
         self.main_window.undo_manager.push(cmd)
         
-        # Store in pending segments
         self.pending_segments.append(bundle)
         
-        # Prepare for next segment
         self.current_segment_start = end_pos
         self.current_start_node = end_node
         self.current_start_item = end_item
         
-        # Update preview line
         if self.preview_line:
             self.preview_line.setLine(
                 end_pos.x(), end_pos.y(),
@@ -380,6 +402,8 @@ class BundleDrawTool(QObject):
         self.main_window.statusBar().showMessage(
             f"Bundle segment created - click to continue, Right-click to finish", 1000
         )
+
+
 
     
     def finish_polyline(self):

@@ -3,6 +3,70 @@ from PyQt5.QtWidgets import QMenu, QAction
 from PyQt5.QtCore import Qt, QPointF
 from PyQt5.QtGui import QCursor
 
+class BranchPointContextMenu(QMenu):
+    """Right-click context menu for branch points"""
+    
+    def __init__(self, branch_point, main_window):
+        super().__init__()
+        self.branch_point = branch_point
+        self.main_window = main_window
+        
+        self.setTitle("Branch Point Actions")
+        self.setup_actions()
+    
+    def setup_actions(self):
+        print("setup action")
+        # Move action
+        move_action = QAction("🔄 Move", self)
+        move_action.triggered.connect(self.start_move)
+        self.addAction(move_action)
+        
+        self.addSeparator()
+        
+        # Properties action (if you have a property editor)
+        properties_action = QAction("📋 Properties", self)
+        properties_action.triggered.connect(self.show_properties)
+        self.addAction(properties_action)
+        
+        self.addSeparator()
+        
+        # Delete action
+        delete_action = QAction("🗑️ Delete Point", self)
+        delete_action.triggered.connect(self.delete_branch_point)
+        self.addAction(delete_action)
+    
+    def start_move(self):
+        """Start moving the branch point"""
+        self.main_window.statusBar().showMessage(
+            "Click to place branch point at new position", 0
+        )
+        self.main_window.moving_branch_point = self.branch_point
+    
+    def show_properties(self):
+        """Show properties in property editor"""
+        if hasattr(self.main_window, 'property_editor'):
+            self.main_window.property_editor.set_item(self.branch_point)
+    
+    def delete_branch_point(self):
+        """Delete this branch point"""
+        from PyQt5.QtWidgets import QMessageBox
+        
+        reply = QMessageBox.question(
+            self.main_window,
+            "Delete Branch Point",
+            "Are you sure you want to delete this branch point?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            from commands.topology_commands import DeleteBranchPointCommand
+            cmd = DeleteBranchPointCommand(
+                self.main_window.scene,
+                self.branch_point,
+                self.main_window
+            )
+            self.main_window.undo_manager.push(cmd)
+
 class ConnectorContextMenu(QMenu):
     """Right-click context menu for connectors"""
     
@@ -16,7 +80,7 @@ class ConnectorContextMenu(QMenu):
     
     def setup_actions(self):
         """Create all menu actions"""
-        
+        print("setup action con")
         # Edit actions
         rename_action = QAction("✏️ Rename", self)
         rename_action.triggered.connect(self.rename_connector)
@@ -65,7 +129,7 @@ class ConnectorContextMenu(QMenu):
         self.addSeparator()
         
         # Delete action (at bottom for safety)
-        delete_action = QAction("🗑️ Delete", self)
+        delete_action = QAction("🗑️ Delete Connector", self)
         delete_action.setShortcut("Del")
         delete_action.triggered.connect(self.delete_connector)
         self.addAction(delete_action)
@@ -209,7 +273,7 @@ class WireContextMenu(QMenu):
         
         self.addSeparator()
         
-        delete_action = QAction("🗑️ Delete", self)
+        delete_action = QAction("🗑️ Delete Wire", self)
         delete_action.triggered.connect(self.delete_wire)
         self.addAction(delete_action)
     
@@ -268,7 +332,7 @@ class BundleContextMenu(QMenu):
         
         self.addSeparator()
         
-        delete_action = QAction("🗑️ Delete", self)
+        delete_action = QAction("🗑️ Delete Bundle", self)
         delete_action.triggered.connect(self.delete_bundle)
         self.addAction(delete_action)
     
@@ -313,25 +377,5 @@ class BundleContextMenu(QMenu):
         self.main_window.undo_manager.push(cmd)
 
 
-class BranchPointContextMenu(QMenu):
-    """Right-click context menu for branch points"""
-    
-    def __init__(self, branch_point, main_window):
-        super().__init__()
-        self.branch_point = branch_point
-        self.main_window = main_window
-        
-        self.setTitle("Branch Point Actions")
-        self.setup_actions()
-    
-    def setup_actions(self):
-        delete_action = QAction("🗑️ Delete", self)
-        delete_action.triggered.connect(self.delete_branch_point)
-        self.addAction(delete_action)
-    
-    def delete_branch_point(self):
-        # Select and delete
-        self.main_window.scene.clearSelection()
-        self.branch_point.setSelected(True)
-        self.main_window.delete_selected_with_undo()
+
 

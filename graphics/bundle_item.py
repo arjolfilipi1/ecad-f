@@ -109,7 +109,7 @@ class BundleItem(QGraphicsPathItem):
             return
         
         self._updating = True
-        
+        print(self.start_node,self.end_node)
         try:
             changed = False
             
@@ -142,6 +142,18 @@ class BundleItem(QGraphicsPathItem):
                             wire.update_path()
         finally:
             self._updating = False
+    def transfer_wires_to(self, target_bundle):
+        """Transfer all wires from this bundle to another bundle"""
+        for wire_id in self.wire_ids:
+            if wire_id not in target_bundle.wire_ids:
+                target_bundle.assign_wire(wire_id)
+        
+        # Clear this bundle's wires
+        self.wire_ids.clear()
+        self.wire_count = 0
+        self.model.wire_ids.clear()
+        self.model.wire_count = 0
+        self.update_appearance()
 
     def update_path(self):
         """Update the bundle path"""

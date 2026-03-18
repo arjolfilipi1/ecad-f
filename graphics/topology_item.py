@@ -94,20 +94,32 @@ class JunctionGraphicsItem(QGraphicsEllipseItem):
 
 class BranchPointGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of a branch point"""
-    def __init__(self,  model, main_window=None):
+    
+    def __init__(self, model, main_window=None):
+        """
+        Create a branch point graphics item from a BranchPoint model.
+        
+        Args:
+            model: The BranchPoint model object
+            main_window: Reference to main window
+        """
         super().__init__(-7, -7, 14, 14)
         self.model = model
         self.model.graphics_item = self  # Set reverse reference
         self.main_window = main_window
         self.node_type = "Branch point"
-
+        self.branch_node = None  # For backward compatibility
+        self.tree_item = None
+        self._old_pos = None  # For undo tracking
         
         # Set position from model
         self.setPos(model.position[0], model.position[1])
         
-        # Enable selection and hover
+        # Enable selection, movement, and hover
         self.setFlag(self.ItemIsSelectable, True)
+        self.setFlag(self.ItemIsMovable, True)  # Make it draggable
         self.setFlag(self.ItemIsFocusable, True)
+        self.setFlag(self.ItemSendsGeometryChanges, True)  # Track position changes
         self.setAcceptHoverEvents(True)
         
         # Visual properties based on branch type
@@ -126,11 +138,23 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         
         self._is_hovered = False
         self._updating = False
-        self.tree_item = None
-
+    
     def get_node(self):
-        return self.branch_node
-        
+        """Get the topology node (for backward compatibility)"""
+        return self
+    @property
+    def position(self):
+        return [self.pos().x(),self.pos().y()]
+    @property
+    def id(self) -> str:
+        """Get wire ID from model"""
+        return self.model.id
+
+    def get_branch_point(self):
+        """Get the branch point model"""
+        return self.model
+
+    
     def set_main_window(self, window):
         """Set reference to main window and register"""
         self.main_window = window
@@ -152,17 +176,62 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
         finally:
             self._updating = False
     
+    def _update_connected_segments(self):
+        """Update all segments connected to this branch point"""
+        if not self.branch_node or not hasattr(self.main_window, 'topology_manager'):
+            return
+        
+        # Find all segments connected to this node
+        for segment in self.main_window.topology_manager.segments.values():
+            if segment.start_node == self.branch_node or segment.end_node == self.branch_node:
+                # Update segment graphics if it exists
+                if hasattr(segment, 'graphics_item') and segment.graphics_item:
+                    segment.graphics_item.update_path()
+                
+                # Update any wires in this segment
+                for wire in segment.wires:
+                    if hasattr(wire, 'graphics_item') and wire.graphics_item:
+                        wire.graphics_item.update_path()
+    
     def itemChange(self, change, value):
-        if change == self.ItemPositionHasChanged:
+        if change == self.ItemPositionChange and self.scene():
+            # Store old position for undo
+            self._old_pos = self.pos()
+            
+        elif change == self.ItemPositionHasChanged:
             # Update model position
             self.model.position = (self.pos().x(), self.pos().y())
             
-            # Update connected segments (to be implemented)
+            # Update topology node if it exists
+            if self.branch_node:
+                self.branch_node.position = self.model.position
+            
+            # Update connected segments
+            self._update_connected_segments()
             
             # Update connected bundles
             self._update_connected_bundles()
             
         return super().itemChange(change, value)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release - create undo command if moved"""
+        if event.button() == Qt.LeftButton and self._old_pos is not None:
+            new_pos = self.pos()
+            if self._old_pos != new_pos:
+                self._create_move_undo_command(self._old_pos, new_pos)
+        
+        self._old_pos = None
+        super().mouseReleaseEvent(event)
+    
+    def _create_move_undo_command(self, old_pos, new_pos):
+        """Create undo command for move operation"""
+        if not self.main_window:
+            return
+        
+        from commands.topology_commands import MoveBranchPointCommand
+        cmd = MoveBranchPointCommand(self, old_pos, new_pos, self.main_window)
+        self.main_window.undo_manager.push(cmd)
     
     def contextMenuEvent(self, event):
         """Handle right-click context menu"""
@@ -219,6 +288,7 @@ class BranchPointGraphicsItem(QGraphicsEllipseItem):
             except:
                 pass
             self.tree_item = None
+
 
         
 class FastenerGraphicsItem(QGraphicsEllipseItem):

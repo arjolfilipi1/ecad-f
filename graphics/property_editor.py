@@ -643,7 +643,7 @@ class PropertyEditor(QWidget):
         basic_layout = QFormLayout(basic_group)
         
         # Type
-        type_edit = QLineEdit(branch_item.branch_node.branch_type)
+        type_edit = QLineEdit(branch_item.node_type)
         type_edit.setReadOnly(True)
         basic_layout.addRow("Type:", type_edit)
         
@@ -667,8 +667,8 @@ class PropertyEditor(QWidget):
         seg_group = QGroupBox("Connected Segments")
         seg_layout = QVBoxLayout(seg_group)
         
-        for seg in branch_item.branch_node.connected_segments:
-            label = QLabel(f"• {seg.id} ({len(seg.wires)} wires)")
+        for seg in branch_item.model.connected_segments:
+            label = QLabel(f"• {seg} )")
             seg_layout.addWidget(label)
         
         self.content_layout.addWidget(seg_group)
@@ -761,13 +761,17 @@ class PropertyEditor(QWidget):
                 value if coord == 'x' else old_pos.x(),
                 value if coord == 'y' else old_pos.y()
             )
-            
-            # Create move command
-            from commands.connector_commands import MoveConnectorCommand
-            cmd = MoveConnectorCommand(self.current_item, old_pos, new_pos)
-            self.main_window.undo_manager.push(cmd)
-
-
+            if self.current_item.node_type == "Connector":
+                # Create move command
+                from commands.connector_commands import MoveConnectorCommand
+                cmd = MoveConnectorCommand(self.current_item, old_pos, new_pos)
+                self.main_window.undo_manager.push(cmd)
+            elif self.current_item.node_type == "Branch point":
+                from commands.topology_commands import MoveBranchPointCommand
+                cmd = MoveBranchPointCommand(self.current_item, old_pos, new_pos)
+                self.main_window.undo_manager.push(cmd)
+                
+                
     def select_connector_from_db(self, connector_item):
         """Open database selector and apply selected connector"""
         from dialogs.connector_selector import ConnectorSelectorDialog
